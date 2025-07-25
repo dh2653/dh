@@ -18,7 +18,7 @@ def root():
 
 @app.get("/tide")
 def get_tide_data(region: str, date: str):
-    url = f"https://www.kmoc.go.kr/tide/{region}/{date}"  # 실제 URL로 바꿔야 함
+    url = f"https://www.khoa.go.kr/tide/{region}/{date}"  # 실제 URL로 바꿔야 함
 
     headers = {
         "User-Agent": "Mozilla/5.0"
