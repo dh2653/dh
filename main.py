@@ -13,13 +13,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ✅ 루트 경로 추가: Render 헬스체크 및 접속 확인용
+@app.get("/")
+def root():
+    return {"message": "Welcome to Tide Info API", "status": "ok"}
+
 @app.get("/tide")
 def get_tide_data(region: str, date: str):
     url = f"https://www.badatime.com/tide/{region}/{date}"
     response = requests.get(url)
     soup = BeautifulSoup(response.text, "html.parser")
 
-    # 👇 예시 파싱: 실제 구조에 맞게 수정 필요
     table = soup.select_one(".tide_table")
     if not table:
         return {"error": "No tide data found"}
@@ -39,7 +43,7 @@ def get_tide_data(region: str, date: str):
         "data": data
     }
 
-# 🚀 서버 실행 (배포 환경 또는 로컬에서 직접 실행할 때 사용됨)
+# 아래 __main__ 블록은 로컬 테스트용
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
