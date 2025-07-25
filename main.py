@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import requests
+from bs4 import BeautifulSoup
 
 app = FastAPI()
 
@@ -16,14 +18,26 @@ def root():
     return {"message": "Welcome to Tide Info API", "status": "ok"}
 
 @app.get("/tide")
-def get_mock_tide_data(region: str, date: str):
+def get_tide_data(region: str, date: str):
+    url = f"https://www.badatime.com/tide/{region}/{date}"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    table = soup.select_one(".tide_table")
+    if not table:
+        return {"error": "No tide data found"}
+
+    rows = table.select("tr")
+    data = []
+    for row in rows[1:]:
+        cells = row.select("td")
+        if len(cells) >= 2:
+            time = cells[0].get_text(strip=True)
+            tide = cells[1].get_text(strip=True)
+            data.append({"time": time, "tide": tide})
+
     return {
         "region": region,
         "date": date,
-        "data": [
-            {"time": "04:12", "tide": "170cm"},
-            {"time": "10:20", "tide": "80cm"},
-            {"time": "16:45", "tide": "190cm"},
-            {"time": "22:10", "tide": "70cm"},
-        ]
+        "data": data
     }
