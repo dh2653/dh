@@ -38,3 +38,8 @@ def get_tide_data(region: str, date: str):
         "date": date,
         "data": data
     }
+
+# 🚀 서버 실행 (배포 환경 또는 로컬에서 직접 실행할 때 사용됨)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
