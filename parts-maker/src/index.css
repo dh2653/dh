@@ -1,0 +1,57 @@
+:root {
+  --ink: #0c1219;
+  --ink-2: #152030;
+  --ink-3: #1e2e42;
+  --paper: #f2ebe0;
+  --paper-dim: #c9c0b2;
+  --amber: #e8a54b;
+  --amber-deep: #c4822a;
+  --teal: #3db8a0;
+  --danger: #d45d5d;
+  --line: rgba(242, 235, 224, 0.12);
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --font-display: "Syne", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", sans-serif;
+  color: var(--paper);
+  background: var(--ink);
+  font-family: var(--font-body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse 80% 55% at 15% 10%, rgba(232, 165, 75, 0.14), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 80%, rgba(61, 184, 160, 0.1), transparent 50%),
+    linear-gradient(165deg, #0a1018 0%, #121c2a 45%, #0c141f 100%);
+  background-attachment: fixed;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: rgba(232, 165, 75, 0.35);
+}
