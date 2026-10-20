@@ -2,17 +2,14 @@ import { partColor } from "./colors";
 import type { PartMeta, ProjectState } from "../types";
 
 /**
- * Client-side demo segmentation (no API keys required).
+ * Client editing helpers + offline fallback segmentation.
  *
- * Pipeline:
- * 1. Edge flood-fill → background mask
- * 2. Spatial + color k-means on foreground → regions
- * 3. Position heuristics → Spine-style names + drawOrder
+ * Preferred path: `proposePartsViaApi` → rembg(U2Net) + OpenCV watershed (server/).
+ * Fallback here: edge flood-fill FG + marker watershed (no neural net).
  *
- * Swap `proposeParts` for a real SAM / vision API later (see README).
+ * SAM plug-in: replace server `propose_parts` or the API response mapper;
+ * keep returning `{ width, height, source, labels, parts }`.
  */
-
-const BG = 0;
 
 function idx(x: number, y: number, w: number): number {
   return y * w + x;
@@ -24,6 +21,28 @@ function colorDist(a: Uint8ClampedArray, ia: number, b: Uint8ClampedArray, ib: n
   const db = a[ia + 2]! - b[ib + 2]!;
   return dr * dr + dg * dg + db * db;
 }
+
+const PART_SEEDS: { name: string; nx: number; ny: number; drawOrder: number }[] = [
+  { name: "hat", nx: 0.5, ny: 0.05, drawOrder: 16 },
+  { name: "head", nx: 0.5, ny: 0.14, drawOrder: 15 },
+  { name: "hair", nx: 0.42, ny: 0.18, drawOrder: 14 },
+  { name: "torso", nx: 0.5, ny: 0.36, drawOrder: 10 },
+  { name: "vest", nx: 0.5, ny: 0.42, drawOrder: 11 },
+  { name: "left_upper_arm", nx: 0.74, ny: 0.34, drawOrder: 3 },
+  { name: "right_upper_arm", nx: 0.26, ny: 0.34, drawOrder: 19 },
+  { name: "left_forearm", nx: 0.8, ny: 0.48, drawOrder: 2 },
+  { name: "right_forearm", nx: 0.2, ny: 0.48, drawOrder: 18 },
+  { name: "left_hand", nx: 0.84, ny: 0.58, drawOrder: 1 },
+  { name: "right_hand", nx: 0.16, ny: 0.58, drawOrder: 17 },
+  { name: "sash", nx: 0.55, ny: 0.52, drawOrder: 12 },
+  { name: "pelvis", nx: 0.5, ny: 0.58, drawOrder: 13 },
+  { name: "left_thigh", nx: 0.62, ny: 0.7, drawOrder: 6 },
+  { name: "right_thigh", nx: 0.38, ny: 0.7, drawOrder: 9 },
+  { name: "left_lower_leg", nx: 0.64, ny: 0.84, drawOrder: 5 },
+  { name: "right_lower_leg", nx: 0.36, ny: 0.84, drawOrder: 8 },
+  { name: "left_foot", nx: 0.66, ny: 0.95, drawOrder: 4 },
+  { name: "right_foot", nx: 0.34, ny: 0.95, drawOrder: 7 },
+];
 
 /** Flood from edges: mark near-edge colors as background. */
 function markBackground(data: ImageData, tolerance = 48): Uint8Array {
@@ -47,7 +66,6 @@ function markBackground(data: ImageData, tolerance = 48): Uint8Array {
     push(w - 1, y);
   }
 
-  // Seed color = average of edge pixels already queued (first wave)
   let head = 0;
   while (head < queue.length) {
     const i = queue[head++]!;
@@ -64,7 +82,6 @@ function markBackground(data: ImageData, tolerance = 48): Uint8Array {
       const ni = idx(nx, ny, w);
       if (bg[ni]) continue;
       const nb = ni * 4;
-      // Compare to seed pixel AND treat near-white / near-transparent as bg
       const alpha = px[nb + 3]!;
       const lum = (px[nb]! + px[nb + 1]! + px[nb + 2]!) / 3;
       const nearWhite = lum > 245 && alpha > 200;
@@ -78,241 +95,7 @@ function markBackground(data: ImageData, tolerance = 48): Uint8Array {
   return bg;
 }
 
-interface Sample {
-  x: number;
-  y: number;
-  r: number;
-  g: number;
-  b: number;
-  i: number;
-}
-
-function collectForeground(data: ImageData, bg: Uint8Array): Sample[] {
-  const { width: w, height: h, data: px } = data;
-  const samples: Sample[] = [];
-  const step = Math.max(1, Math.floor(Math.sqrt((w * h) / 12000)));
-  for (let y = 0; y < h; y += step) {
-    for (let x = 0; x < w; x += step) {
-      const i = idx(x, y, w);
-      if (bg[i]) continue;
-      const o = i * 4;
-      samples.push({
-        x,
-        y,
-        r: px[o]!,
-        g: px[o + 1]!,
-        b: px[o + 2]!,
-        i,
-      });
-    }
-  }
-  return samples;
-}
-
-function kmeans(samples: Sample[], k: number, iters = 12): number[] {
-  if (samples.length === 0) return [];
-  const kk = Math.min(k, samples.length);
-  // Init: spread by y then x
-  const sorted = [...samples].sort((a, b) => a.y - b.y || a.x - b.x);
-  const centroids = Array.from({ length: kk }, (_, ci) => {
-    const s = sorted[Math.floor((ci + 0.5) * (sorted.length / kk))]!;
-    return { x: s.x, y: s.y, r: s.r, g: s.g, b: s.b };
-  });
-  const assign = new Array<number>(samples.length).fill(0);
-
-  for (let iter = 0; iter < iters; iter++) {
-    for (let si = 0; si < samples.length; si++) {
-      const s = samples[si]!;
-      let best = 0;
-      let bestD = Infinity;
-      for (let c = 0; c < kk; c++) {
-        const ct = centroids[c]!;
-        const dx = (s.x - ct.x) * 0.35;
-        const dy = (s.y - ct.y) * 0.55;
-        const dr = (s.r - ct.r) * 0.9;
-        const dg = (s.g - ct.g) * 0.9;
-        const db = (s.b - ct.b) * 0.9;
-        const d = dx * dx + dy * dy + dr * dr + dg * dg + db * db;
-        if (d < bestD) {
-          bestD = d;
-          best = c;
-        }
-      }
-      assign[si] = best;
-    }
-    const sums = Array.from({ length: kk }, () => ({
-      x: 0,
-      y: 0,
-      r: 0,
-      g: 0,
-      b: 0,
-      n: 0,
-    }));
-    for (let si = 0; si < samples.length; si++) {
-      const s = samples[si]!;
-      const c = assign[si]!;
-      const t = sums[c]!;
-      t.x += s.x;
-      t.y += s.y;
-      t.r += s.r;
-      t.g += s.g;
-      t.b += s.b;
-      t.n++;
-    }
-    for (let c = 0; c < kk; c++) {
-      const t = sums[c]!;
-      if (t.n === 0) continue;
-      centroids[c] = {
-        x: t.x / t.n,
-        y: t.y / t.n,
-        r: t.r / t.n,
-        g: t.g / t.n,
-        b: t.b / t.n,
-      };
-    }
-  }
-  return assign;
-}
-
-/** Canonical Spine-ish names ordered by typical vertical layout. */
-const NAME_TEMPLATES = [
-  { name: "hat", y: 0.06, x: 0.5 },
-  { name: "head", y: 0.14, x: 0.5 },
-  { name: "hair", y: 0.18, x: 0.42 },
-  { name: "torso", y: 0.38, x: 0.5 },
-  { name: "vest", y: 0.42, x: 0.48 },
-  { name: "left_upper_arm", y: 0.36, x: 0.72 },
-  { name: "right_upper_arm", y: 0.36, x: 0.28 },
-  { name: "left_forearm", y: 0.48, x: 0.78 },
-  { name: "right_forearm", y: 0.48, x: 0.22 },
-  { name: "left_hand", y: 0.58, x: 0.82 },
-  { name: "right_hand", y: 0.58, x: 0.18 },
-  { name: "sash", y: 0.52, x: 0.55 },
-  { name: "pelvis", y: 0.58, x: 0.5 },
-  { name: "left_thigh", y: 0.7, x: 0.62 },
-  { name: "right_thigh", y: 0.7, x: 0.38 },
-  { name: "left_lower_leg", y: 0.84, x: 0.64 },
-  { name: "right_lower_leg", y: 0.84, x: 0.36 },
-  { name: "left_foot", y: 0.95, x: 0.66 },
-  { name: "right_foot", y: 0.95, x: 0.34 },
-];
-
-/** Back → front draw order stubs (higher = front). */
-const DEFAULT_DRAW: Record<string, number> = {
-  left_hand: 1,
-  left_forearm: 2,
-  left_upper_arm: 3,
-  left_foot: 4,
-  left_lower_leg: 5,
-  left_thigh: 6,
-  right_foot: 7,
-  right_lower_leg: 8,
-  right_thigh: 9,
-  torso: 10,
-  vest: 11,
-  sash: 12,
-  pelvis: 13,
-  hair: 14,
-  head: 15,
-  hat: 16,
-  right_hand: 17,
-  right_forearm: 18,
-  right_upper_arm: 19,
-};
-
-function nameClusters(
-  centroids: { x: number; y: number; n: number }[],
-  bbox: { minX: number; minY: number; maxX: number; maxY: number },
-): string[] {
-  const bw = Math.max(1, bbox.maxX - bbox.minX);
-  const bh = Math.max(1, bbox.maxY - bbox.minY);
-  const used = new Set<string>();
-  return centroids.map((c) => {
-    const nx = (c.x - bbox.minX) / bw;
-    const ny = (c.y - bbox.minY) / bh;
-    let best = `part_${centroids.indexOf(c) + 1}`;
-    let bestD = Infinity;
-    for (const t of NAME_TEMPLATES) {
-      if (used.has(t.name)) continue;
-      const d = (nx - t.x) ** 2 + (ny - t.y) ** 2 * 1.4;
-      if (d < bestD) {
-        bestD = d;
-        best = t.name;
-      }
-    }
-    used.add(best);
-    return best;
-  });
-}
-
-function paintNearest(
-  data: ImageData,
-  bg: Uint8Array,
-  samples: Sample[],
-  assign: number[],
-  clusterCount: number,
-): Uint16Array {
-  const { width: w, height: h, data: px } = data;
-  const labels = new Uint16Array(w * h);
-  const centroids = Array.from({ length: clusterCount }, () => ({
-    x: 0,
-    y: 0,
-    r: 0,
-    g: 0,
-    b: 0,
-    n: 0,
-  }));
-  for (let si = 0; si < samples.length; si++) {
-    const s = samples[si]!;
-    const c = assign[si]!;
-    const t = centroids[c]!;
-    t.x += s.x;
-    t.y += s.y;
-    t.r += s.r;
-    t.g += s.g;
-    t.b += s.b;
-    t.n++;
-  }
-  for (const t of centroids) {
-    if (t.n === 0) continue;
-    t.x /= t.n;
-    t.y /= t.n;
-    t.r /= t.n;
-    t.g /= t.n;
-    t.b /= t.n;
-  }
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = idx(x, y, w);
-      if (bg[i]) {
-        labels[i] = BG;
-        continue;
-      }
-      const o = i * 4;
-      let best = 0;
-      let bestD = Infinity;
-      for (let c = 0; c < clusterCount; c++) {
-        const ct = centroids[c]!;
-        if (ct.n === 0) continue;
-        const dx = (x - ct.x) * 0.35;
-        const dy = (y - ct.y) * 0.55;
-        const dr = (px[o]! - ct.r) * 0.9;
-        const dg = (px[o + 1]! - ct.g) * 0.9;
-        const db = (px[o + 2]! - ct.b) * 0.9;
-        const d = dx * dx + dy * dy + dr * dr + dg * dg + db * db;
-        if (d < bestD) {
-          bestD = d;
-          best = c;
-        }
-      }
-      labels[i] = (best + 1) as number; // 1-based part ids
-    }
-  }
-  return labels;
-}
-
-function bboxOf(bg: Uint8Array, w: number, h: number) {
+function fgBBox(bg: Uint8Array, w: number, h: number) {
   let minX = w,
     minY = h,
     maxX = 0,
@@ -330,94 +113,161 @@ function bboxOf(bg: Uint8Array, w: number, h: number) {
   return { minX, minY, maxX, maxY };
 }
 
-function remapCompact(labels: Uint16Array, names: string[]): { labels: Uint16Array; parts: PartMeta[] } {
-  const counts = new Map<number, number>();
-  for (let i = 0; i < labels.length; i++) {
-    const id = labels[i]!;
-    if (id === BG) continue;
-    counts.set(id, (counts.get(id) ?? 0) + 1);
-  }
-  // Drop tiny clusters (< 0.15% of fg)
-  let fg = 0;
-  for (const n of counts.values()) fg += n;
-  const minPix = Math.max(40, fg * 0.0015);
-  const keep = [...counts.entries()]
-    .filter(([, n]) => n >= minPix)
-    .sort((a, b) => a[0] - b[0])
-    .map(([id]) => id);
-
-  const map = new Map<number, number>();
-  keep.forEach((old, i) => map.set(old, i + 1));
-
-  const next = new Uint16Array(labels.length);
-  for (let i = 0; i < labels.length; i++) {
-    const id = labels[i]!;
-    if (id === BG) {
-      next[i] = BG;
-      continue;
-    }
-    const m = map.get(id);
-    next[i] = m ?? 0xffff;
-  }
-
-  const parts: PartMeta[] = keep.map((oldId, i) => {
-    const name = names[oldId - 1] ?? `part_${i + 1}`;
-    return {
-      id: i + 1,
-      name,
-      drawOrder: DEFAULT_DRAW[name] ?? i + 1,
-      color: partColor(i),
-      parent: null,
-      pivot: { x: 0.5, y: 0.5 },
-    };
-  });
-
-  return { labels: next, parts };
+function luminanceAt(px: Uint8ClampedArray, i: number): number {
+  const o = i * 4;
+  return 0.299 * px[o]! + 0.587 * px[o + 1]! + 0.114 * px[o + 2]!;
 }
 
-function absorbOrphans(labels: Uint16Array, w: number, h: number): void {
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = idx(x, y, w);
-      if (labels[i] !== 0xffff) continue;
-      let found = BG;
-      for (let r = 1; r < 24 && found === BG; r++) {
-        for (let dy = -r; dy <= r; dy++) {
-          for (let dx = -r; dx <= r; dx++) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-            const v = labels[idx(nx, ny, w)]!;
-            if (v !== BG && v !== 0xffff) {
-              found = v;
-              break;
-            }
-          }
-          if (found !== BG) break;
+/**
+ * Offline fallback: anatomical seed markers + priority-flood (edge-aware),
+ * replacing the old k-means stub.
+ */
+export function proposePartsLocal(source: ImageData): ProjectState {
+  const { width: w, height: h, data: px } = source;
+  const bg = markBackground(source);
+  const box = fgBBox(bg, w, h);
+  const bw = Math.max(1, box.maxX - box.minX);
+  const bh = Math.max(1, box.maxY - box.minY);
+
+  type Seed = { id: number; name: string; drawOrder: number; x: number; y: number };
+  const seeds: Seed[] = [];
+  let nextId = 1;
+  for (const s of PART_SEEDS) {
+    const sx = Math.round(box.minX + s.nx * bw);
+    const sy = Math.round(box.minY + s.ny * bh);
+    let placed = false;
+    for (let r = 0; r < 28 && !placed; r++) {
+      for (let dy = -r; dy <= r && !placed; dy++) {
+        for (let dx = -r; dx <= r && !placed; dx++) {
+          const x = sx + dx;
+          const y = sy + dy;
+          if (x < 0 || y < 0 || x >= w || y >= h) continue;
+          if (bg[idx(x, y, w)]) continue;
+          seeds.push({ id: nextId++, name: s.name, drawOrder: s.drawOrder, x, y });
+          placed = true;
         }
       }
-      labels[i] = found;
     }
   }
-}
 
-function computePivots(labels: Uint16Array, w: number, h: number, parts: PartMeta[]): void {
-  for (const p of parts) {
+  const labels = new Uint16Array(w * h);
+  if (seeds.length === 0) {
+    return { width: w, height: h, source, labels, parts: [] };
+  }
+
+  // Dijkstra-like region grow with color+edge cost
+  type Node = { i: number; cost: number; id: number };
+  const heap: Node[] = [];
+  const push = (n: Node) => {
+    heap.push(n);
+    let ci = heap.length - 1;
+    while (ci > 0) {
+      const pi = (ci - 1) >> 1;
+      if (heap[pi]!.cost <= heap[ci]!.cost) break;
+      [heap[pi], heap[ci]] = [heap[ci]!, heap[pi]!];
+      ci = pi;
+    }
+  };
+  const pop = (): Node | undefined => {
+    if (!heap.length) return undefined;
+    const top = heap[0]!;
+    const last = heap.pop()!;
+    if (heap.length) {
+      heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1;
+        const r = l + 1;
+        let smallest = i;
+        if (l < heap.length && heap[l]!.cost < heap[smallest]!.cost) smallest = l;
+        if (r < heap.length && heap[r]!.cost < heap[smallest]!.cost) smallest = r;
+        if (smallest === i) break;
+        [heap[i], heap[smallest]] = [heap[smallest]!, heap[i]!];
+        i = smallest;
+      }
+    }
+    return top;
+  };
+
+  const best = new Float32Array(w * h);
+  best.fill(Infinity);
+  for (const s of seeds) {
+    const i = idx(s.x, s.y, w);
+    best[i] = 0;
+    labels[i] = s.id;
+    push({ i, cost: 0, id: s.id });
+  }
+
+  while (heap.length) {
+    const cur = pop()!;
+    if (cur.cost !== best[cur.i]) continue;
+    const x = cur.i % w;
+    const y = (cur.i / w) | 0;
+    const baseLum = luminanceAt(px, cur.i);
+    for (const [nx, ny] of [
+      [x - 1, y],
+      [x + 1, y],
+      [x, y - 1],
+      [x, y + 1],
+    ] as const) {
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      const ni = idx(nx, ny, w);
+      if (bg[ni]) continue;
+      const edge = Math.abs(luminanceAt(px, ni) - baseLum);
+      const step = 1 + edge * 0.35 + colorDist(px, cur.i * 4, px, ni * 4) * 0.002;
+      const nc = cur.cost + step;
+      if (nc < best[ni]!) {
+        best[ni] = nc;
+        labels[ni] = cur.id;
+        push({ i: ni, cost: nc, id: cur.id });
+      }
+    }
+  }
+
+  const parts: PartMeta[] = seeds.map((s, i) => {
     let sx = 0,
       sy = 0,
       n = 0;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (labels[idx(x, y, w)] !== p.id) continue;
-        sx += x;
-        sy += y;
-        n++;
-      }
+    for (let p = 0; p < labels.length; p++) {
+      if (labels[p] !== s.id) continue;
+      sx += p % w;
+      sy += (p / w) | 0;
+      n++;
     }
-    if (n > 0) {
-      p.pivot = { x: sx / n / w, y: sy / n / h };
-    }
+    return {
+      id: s.id,
+      name: s.name,
+      drawOrder: s.drawOrder,
+      color: partColor(i),
+      parent: null,
+      pivot: n
+        ? { x: sx / n / w, y: sy / n / h }
+        : { x: 0.5, y: 0.5 },
+    };
+  }).filter((p) => {
+    for (let i = 0; i < labels.length; i++) if (labels[i] === p.id) return true;
+    return false;
+  });
+
+  // Remap contiguous
+  const idMap = new Map(parts.map((p, i) => [p.id, i + 1]));
+  for (let i = 0; i < labels.length; i++) {
+    const id = labels[i]!;
+    if (!id) continue;
+    labels[i] = idMap.get(id) ?? 0;
   }
+  const finalParts = parts.map((p, i) => ({
+    ...p,
+    id: i + 1,
+    color: partColor(i),
+  }));
+
+  return { width: w, height: h, source, labels, parts: finalParts };
+}
+
+/** @deprecated use proposePartsLocal — kept for call sites during migration */
+export function proposeParts(source: ImageData, _targetParts = 12): ProjectState {
+  return proposePartsLocal(source);
 }
 
 export async function loadImageData(file: Blob): Promise<ImageData> {
@@ -434,71 +284,6 @@ export async function loadImageData(file: Blob): Promise<ImageData> {
   return ctx.getImageData(0, 0, w, h);
 }
 
-export function proposeParts(source: ImageData, targetParts = 12): ProjectState {
-  const { width: w, height: h } = source;
-  const bg = markBackground(source);
-  const samples = collectForeground(source, bg);
-  if (samples.length < 10) {
-    return {
-      width: w,
-      height: h,
-      source,
-      labels: new Uint16Array(w * h),
-      parts: [],
-    };
-  }
-
-  const k = Math.min(targetParts, Math.max(4, Math.round(samples.length / 80)));
-  const assign = kmeans(samples, k);
-  const rawLabels = paintNearest(source, bg, samples, assign, k);
-
-  // Centroids for naming
-  const cents = Array.from({ length: k }, () => ({ x: 0, y: 0, n: 0 }));
-  for (let si = 0; si < samples.length; si++) {
-    const s = samples[si]!;
-    const c = assign[si]!;
-    cents[c]!.x += s.x;
-    cents[c]!.y += s.y;
-    cents[c]!.n++;
-  }
-  for (const c of cents) {
-    if (c.n) {
-      c.x /= c.n;
-      c.y /= c.n;
-    }
-  }
-  const box = bboxOf(bg, w, h);
-  const names = nameClusters(cents, box);
-
-  const { labels, parts } = remapCompact(rawLabels, names);
-  absorbOrphans(labels, w, h);
-
-  // Re-number after absorb if any orphan became bg incorrectly — ok
-  // Filter parts that still have pixels
-  const alive = new Set<number>();
-  for (let i = 0; i < labels.length; i++) {
-    const id = labels[i]!;
-    if (id) alive.add(id);
-  }
-  const kept = parts.filter((p) => alive.has(p.id));
-  // Remap ids contiguous
-  const idMap = new Map(kept.map((p, i) => [p.id, i + 1]));
-  for (let i = 0; i < labels.length; i++) {
-    const id = labels[i]!;
-    if (!id) continue;
-    labels[i] = idMap.get(id) ?? 0;
-  }
-  const finalParts = kept.map((p, i) => ({
-    ...p,
-    id: i + 1,
-    color: partColor(i),
-  }));
-  computePivots(labels, w, h, finalParts);
-
-  return { width: w, height: h, source, labels, parts: finalParts };
-}
-
-/** Flood-fill by color similarity; assign to partId (or 0 to erase). */
 export function floodFill(
   project: ProjectState,
   x: number,

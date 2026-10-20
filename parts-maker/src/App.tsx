@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import "./App.css";
 import { downloadReassemblyGif, exportPartsZip, buildReassemblyGif } from "./lib/export";
 import { drawProject } from "./lib/render";
+import { proposePartsBest } from "./lib/propose";
 import {
   addPart,
   floodFill,
-  loadImageData,
   paintBrush,
-  proposeParts,
+  proposePartsLocal,
 } from "./lib/segment";
 import type { AppStep, ProjectState, Tool } from "./types";
 
@@ -56,19 +56,21 @@ export default function App() {
 
   const runPropose = async (blob: Blob) => {
     setBusy(true);
-    setStatus("배경 분리 · 영역 클러스터링 중…");
+    setStatus("U2Net 배경 분리 · 파츠 워터셰드 중…");
     try {
-      const source = await loadImageData(blob);
-      // Yield so UI can paint busy state
       await new Promise((r) => setTimeout(r, 30));
-      const next = proposeParts(source, 12);
+      const { project: next, info } = await proposePartsBest(blob);
       startTransition(() => {
         setProject(next);
         setSelectedId(next.parts[0]?.id ?? null);
         setStep("workspace");
+        const engineLabel =
+          info.via === "api"
+            ? `엔진 ${info.engine}`
+            : `오프라인 fallback (${info.engine})`;
         setStatus(
           next.parts.length
-            ? `${next.parts.length}개 파츠 제안 완료 · 브러시로 다듬은 뒤보내기`
+            ? `${next.parts.length}개 파츠 제안 · ${engineLabel} · 브러시로 다듬기`
             : "전경을 찾지 못했습니다. 배경이 단순한 이미지를 올려 주세요.",
         );
         setGifUrl(null);
@@ -224,7 +226,7 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Phase 1 MVP · 클라이언트 휴리스틱 세그멘테이션 (SAM 연동 준비됨)
+              Phase 1.5 · rembg(U2Net) + 워터셰드 파츠 제안 · 브러시로 다듬기
             </p>
             <input
               ref={fileRef}
@@ -261,13 +263,34 @@ export default function App() {
               onClick={() => {
                 if (!project) return;
                 setBusy(true);
-                setTimeout(() => {
-                  const next = proposeParts(project.source, 12);
-                  setProject(next);
-                  setSelectedId(next.parts[0]?.id ?? null);
-                  setBusy(false);
-                  setStatus("파츠를 다시 제안했습니다.");
-                }, 20);
+                setStatus("다시 제안 중…");
+                // Re-run from current raster as PNG blob
+                void (async () => {
+                  try {
+                    const c = document.createElement("canvas");
+                    c.width = project.width;
+                    c.height = project.height;
+                    c.getContext("2d")!.putImageData(project.source, 0, 0);
+                    const blob = await new Promise<Blob | null>((res) =>
+                      c.toBlob(res, "image/png"),
+                    );
+                    if (!blob) throw new Error("encode failed");
+                    const { project: next, info } = await proposePartsBest(blob);
+                    setProject(next);
+                    setSelectedId(next.parts[0]?.id ?? null);
+                    setStatus(
+                      `다시 제안 완료 · ${info.via === "api" ? info.engine : "fallback"}`,
+                    );
+                  } catch (e) {
+                    console.error(e);
+                    const next = proposePartsLocal(project.source);
+                    setProject(next);
+                    setSelectedId(next.parts[0]?.id ?? null);
+                    setStatus("API 실패 · 로컬 fallback으로 재제안");
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
               }}
             >
               다시 제안
