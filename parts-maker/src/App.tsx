@@ -1,15 +1,27 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import "./App.css";
+import { PartsTable } from "./components/PartsTable";
 import { downloadReassemblyGif, exportPartsZip, buildReassemblyGif } from "./lib/export";
-import { drawProject } from "./lib/render";
+import {
+  addHiddenMarker,
+  applyLightInpaint,
+  estimateHiddenRegions,
+  removeHiddenMarker,
+} from "./lib/hidden";
+import {
+  enrichSpineMeta,
+  moveDrawOrder,
+  updatePart,
+} from "./lib/meta";
 import { proposePartsBest } from "./lib/propose";
+import { drawProject } from "./lib/render";
 import {
   addPart,
   floodFill,
   paintBrush,
   proposePartsLocal,
 } from "./lib/segment";
-import type { AppStep, ProjectState, Tool } from "./types";
+import type { AppStep, PartMeta, ProjectState, Tool } from "./types";
 
 export default function App() {
   const [step, setStep] = useState<AppStep>("landing");
@@ -17,8 +29,11 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
   const [brushSize, setBrushSize] = useState(14);
-  const [overlayOpacity, setOverlayOpacity] = useState(0.42);
+  const [overlayOpacity, setOverlayOpacity] = useState(0.38);
   const [showLabels, setShowLabels] = useState(true);
+  const [showPivots, setShowPivots] = useState(true);
+  const [showBones, setShowBones] = useState(true);
+  const [showHidden, setShowHidden] = useState(true);
   const [dimOthers, setDimOthers] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("이미지를 올리면 파츠를 제안합니다.");
@@ -38,6 +53,9 @@ export default function App() {
     drawProject(ctx, proj, {
       overlayOpacity,
       showLabels,
+      showPivots,
+      showBones,
+      showHidden,
       selectedId,
       dimOthers,
     });
@@ -46,7 +64,16 @@ export default function App() {
   useEffect(() => {
     if (project) redraw(project);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, overlayOpacity, showLabels, selectedId, dimOthers]);
+  }, [
+    project,
+    overlayOpacity,
+    showLabels,
+    showPivots,
+    showBones,
+    showHidden,
+    selectedId,
+    dimOthers,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -56,7 +83,7 @@ export default function App() {
 
   const runPropose = async (blob: Blob) => {
     setBusy(true);
-    setStatus("U2Net 배경 분리 · 파츠 워터셰드 중…");
+    setStatus("U2Net 배경 분리 · 파츠·피벗·히든 마커 추정 중…");
     try {
       await new Promise((r) => setTimeout(r, 30));
       const { project: next, info } = await proposePartsBest(blob);
@@ -70,7 +97,7 @@ export default function App() {
             : `오프라인 fallback (${info.engine})`;
         setStatus(
           next.parts.length
-            ? `${next.parts.length}개 파츠 제안 · ${engineLabel} · 브러시로 다듬기`
+            ? `${next.parts.length}개 파츠 · pivot/parent/hidden 추정 · ${engineLabel}`
             : "전경을 찾지 못했습니다. 배경이 단순한 이미지를 올려 주세요.",
         );
         setGifUrl(null);
@@ -96,16 +123,21 @@ export default function App() {
     return { x, y };
   };
 
-  const mutateLabels = (fn: (p: ProjectState) => void) => {
+  const mutateProject = (fn: (p: ProjectState) => ProjectState | void) => {
     setProject((prev) => {
       if (!prev) return prev;
-      const next: ProjectState = {
+      const draft: ProjectState = {
         ...prev,
         labels: new Uint16Array(prev.labels),
-        parts: prev.parts.map((p) => ({ ...p })),
+        parts: prev.parts.map((p) => ({
+          ...p,
+          pivot: { ...p.pivot },
+        })),
+        hiddenRegions: (prev.hiddenRegions ?? []).map((h) => ({ ...h })),
+        source: prev.source,
       };
-      fn(next);
-      return next;
+      const result = fn(draft);
+      return result ?? draft;
     });
   };
 
@@ -113,19 +145,50 @@ export default function App() {
     if (!project) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const { x, y } = canvasPos(e);
+
+    if (tool === "pivot") {
+      if (selectedId == null) {
+        setStatus("피벗을 옮길 파츠를 테이블에서 선택하세요.");
+        return;
+      }
+      mutateProject((p) =>
+        updatePart(p, selectedId, {
+          pivot: { x: x / p.width, y: y / p.height },
+        }),
+      );
+      setStatus("피벗 위치를 갱신했습니다.");
+      return;
+    }
+
+    if (tool === "hidden") {
+      if (selectedId == null) {
+        setStatus("히든 마커를 붙일 파츠를 선택하세요.");
+        return;
+      }
+      mutateProject((p) =>
+        addHiddenMarker(p, selectedId, x / p.width, y / p.height),
+      );
+      setStatus("히든 영역 마커 추가 · ‘간단 인페인트’로 채울 수 있습니다.");
+      return;
+    }
+
     if (tool === "fill") {
       const id = selectedId ?? 0;
-      mutateLabels((p) => floodFill(p, Math.floor(x), Math.floor(y), id));
+      mutateProject((p) => {
+        floodFill(p, Math.floor(x), Math.floor(y), id);
+      });
       return;
     }
     if (tool === "brush" || tool === "eraser") {
       painting.current = true;
       const id = tool === "eraser" ? 0 : (selectedId ?? 0);
       if (tool === "brush" && selectedId == null) {
-        setStatus("왼쪽 목록에서 파츠를 선택한 뒤 브러시를 쓰세요.");
+        setStatus("파츠를 선택한 뒤 브러시를 쓰세요.");
         return;
       }
-      mutateLabels((p) => paintBrush(p.labels, p.width, p.height, x, y, brushSize, id));
+      mutateProject((p) => {
+        paintBrush(p.labels, p.width, p.height, x, y, brushSize, id);
+      });
     }
   };
 
@@ -133,55 +196,48 @@ export default function App() {
     if (!painting.current || !project) return;
     const { x, y } = canvasPos(e);
     const id = tool === "eraser" ? 0 : (selectedId ?? 0);
-    mutateLabels((p) => paintBrush(p.labels, p.width, p.height, x, y, brushSize, id));
+    mutateProject((p) => {
+      paintBrush(p.labels, p.width, p.height, x, y, brushSize, id);
+    });
   };
 
   const onPointerUp = () => {
     painting.current = false;
   };
 
-  const renameSelected = (name: string) => {
-    if (selectedId == null) return;
-    setProject((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        parts: prev.parts.map((p) => (p.id === selectedId ? { ...p, name } : p)),
-      };
-    });
+  const handlePartChange = (id: number, patch: Partial<PartMeta>) => {
+    setProject((prev) => (prev ? updatePart(prev, id, patch) : prev));
   };
 
   const handleAddPart = () => {
     setProject((prev) => {
       if (!prev) return prev;
-      const copy = { ...prev, parts: [...prev.parts] };
+      const copy = {
+        ...prev,
+        parts: [...prev.parts],
+        hiddenRegions: [...(prev.hiddenRegions ?? [])],
+      };
       const part = addPart(copy);
       setSelectedId(part.id);
-      setStatus(`새 파츠 “${part.name}” 추가 · 브러시/채우기로 마스크를 칠하세요.`);
+      setStatus(`새 파츠 “${part.name}” 추가`);
       return copy;
     });
   };
 
   const handleExportZip = async () => {
     if (!project) return;
-    setStatus("PNG zip 생성 중…");
+    setStatus("PNG zip + parts.json 생성 중…");
     await exportPartsZip(project);
-    setStatus("parts-export.zip 다운로드 완료.");
+    setStatus("parts-export.zip 다운로드 완료 (메타 v2).");
   };
 
   const handleGif = async () => {
     if (!project) return;
-    setStatus("재조립 GIF 생성 중…");
+    setStatus("재조립 GIF 생성 중 (현재 drawOrder)…");
     const blob = await buildReassemblyGif(project);
     if (gifUrl) URL.revokeObjectURL(gifUrl);
-    const url = URL.createObjectURL(blob);
-    setGifUrl(url);
-    setStatus("재조립 GIF 준비됨 · 미리보기 또는 다운로드.");
-  };
-
-  const handleGifDownload = async () => {
-    if (!project) return;
-    await downloadReassemblyGif(project);
+    setGifUrl(URL.createObjectURL(blob));
+    setStatus("재조립 GIF 준비됨 · drawOrder 스택 반영.");
   };
 
   if (step === "landing") {
@@ -192,8 +248,8 @@ export default function App() {
             <h1 className="brand">파츠 제작</h1>
             <p className="headline">캐릭터를 올리고, 파츠로 쪼개세요.</p>
             <p className="sub">
-              AI 제안 마스크를 다듬고, 투명 PNG와 재조립 GIF로 원본이 다시 쌓이는지
-              확인합니다.
+              마스크를 다듬고 Spine식 pivot·parent·draw order를 편집한 뒤, 투명 PNG와
+              재조립 GIF로 검증합니다.
             </p>
             <div className="cta-row">
               <button
@@ -213,8 +269,7 @@ export default function App() {
                     try {
                       const res = await fetch("/demo-character.png");
                       if (!res.ok) throw new Error("sample missing");
-                      const blob = await res.blob();
-                      await runPropose(blob);
+                      await runPropose(await res.blob());
                     } catch (e) {
                       console.error(e);
                       setStatus("샘플 로드 실패");
@@ -226,7 +281,7 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Phase 1.5 · rembg(U2Net) + 워터셰드 파츠 제안 · 브러시로 다듬기
+              Phase 2 · rembg 세그 + Spine 메타 테이블 · 히든 마커 / 간단 인페인트
             </p>
             <input
               ref={fileRef}
@@ -241,11 +296,9 @@ export default function App() {
     );
   }
 
-  const selected = project?.parts.find((p) => p.id === selectedId) ?? null;
-
   return (
     <div className="app">
-      <div className="workspace">
+      <div className="workspace workspace-v2">
         <header className="topbar">
           <div className="topbar-brand">파츠 제작</div>
           <div className="topbar-actions">
@@ -263,8 +316,6 @@ export default function App() {
               onClick={() => {
                 if (!project) return;
                 setBusy(true);
-                setStatus("다시 제안 중…");
-                // Re-run from current raster as PNG blob
                 void (async () => {
                   try {
                     const c = document.createElement("canvas");
@@ -283,10 +334,17 @@ export default function App() {
                     );
                   } catch (e) {
                     console.error(e);
-                    const next = proposePartsLocal(project.source);
-                    setProject(next);
-                    setSelectedId(next.parts[0]?.id ?? null);
-                    setStatus("API 실패 · 로컬 fallback으로 재제안");
+                    const local = proposePartsLocal(project.source);
+                    const withMeta = enrichSpineMeta({
+                      ...local,
+                      hiddenRegions: [],
+                    });
+                    setProject({
+                      ...withMeta,
+                      hiddenRegions: estimateHiddenRegions(withMeta),
+                    });
+                    setSelectedId(withMeta.parts[0]?.id ?? null);
+                    setStatus("API 실패 · 로컬 fallback");
                   } finally {
                     setBusy(false);
                   }
@@ -314,7 +372,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="main">
+        <div className="main main-v2">
           <div className="canvas-panel">
             <div className="toolbar">
               <div className="tool-group">
@@ -323,6 +381,8 @@ export default function App() {
                     ["brush", "브러시"],
                     ["eraser", "지우개"],
                     ["fill", "채우기"],
+                    ["pivot", "피벗"],
+                    ["hidden", "히든"],
                   ] as const
                 ).map(([id, label]) => (
                   <button
@@ -361,7 +421,31 @@ export default function App() {
                   checked={showLabels}
                   onChange={(e) => setShowLabels(e.target.checked)}
                 />
-                번호/이름
+                라벨
+              </label>
+              <label className="slider-label">
+                <input
+                  type="checkbox"
+                  checked={showPivots}
+                  onChange={(e) => setShowPivots(e.target.checked)}
+                />
+                피벗
+              </label>
+              <label className="slider-label">
+                <input
+                  type="checkbox"
+                  checked={showBones}
+                  onChange={(e) => setShowBones(e.target.checked)}
+                />
+                본
+              </label>
+              <label className="slider-label">
+                <input
+                  type="checkbox"
+                  checked={showHidden}
+                  onChange={(e) => setShowHidden(e.target.checked)}
+                />
+                히든
               </label>
               <label className="slider-label">
                 <input
@@ -385,44 +469,53 @@ export default function App() {
             <p className="status">{status}</p>
           </div>
 
-          <aside className="side">
-            <h2>파츠 목록</h2>
-            <ul className="part-list">
-              {(project?.parts ?? [])
-                .slice()
-                .sort((a, b) => a.drawOrder - b.drawOrder)
-                .map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      className={`part-item${selectedId === p.id ? " selected" : ""}`}
-                      onClick={() => setSelectedId(p.id)}
-                    >
-                      <span className="swatch" style={{ background: p.color }} />
-                      <span className="part-name">{p.name}</span>
-                      <span className="part-meta">#{String(p.drawOrder).padStart(2, "0")}</span>
-                    </button>
-                  </li>
-                ))}
-            </ul>
-
-            <button type="button" className="btn btn-ghost" onClick={handleAddPart}>
-              파츠 추가
-            </button>
-
-            {selected && (
-              <div>
-                <h2>선택 파츠</h2>
-                <input
-                  className="rename-input"
-                  value={selected.name}
-                  onChange={(e) => renameSelected(e.target.value)}
-                />
-                <p className="status">
-                  drawOrder {selected.drawOrder} · pivot/parent는 Phase 2 스텁
-                </p>
-              </div>
-            )}
+          <aside className="side side-v2">
+            <div className="meta-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!project}
+                onClick={() => {
+                  if (!project) return;
+                  setProject(enrichSpineMeta(project));
+                  setStatus("피벗·parent를 마스크 기준으로 다시 추정했습니다.");
+                }}
+              >
+                피벗 재추정
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!project}
+                onClick={() => {
+                  if (!project) return;
+                  setProject({
+                    ...project,
+                    hiddenRegions: estimateHiddenRegions(project),
+                  });
+                  setStatus("히든 영역 마커를 관절 기준으로 다시 배치했습니다.");
+                }}
+              >
+                히든 재배치
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!project}
+                onClick={() => {
+                  if (!project) return;
+                  setProject(applyLightInpaint(project));
+                  setStatus(
+                    "간단 인페인트 적용 (이웃 평균) · 생성형 inpaint는 TODO",
+                  );
+                }}
+              >
+                간단 인페인트
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={handleAddPart}>
+                파츠 추가
+              </button>
+            </div>
 
             <div className="preview-block">
               <h2>재조립 GIF</h2>
@@ -432,17 +525,58 @@ export default function App() {
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => void handleGifDownload()}
+                    onClick={() => project && void downloadReassemblyGif(project)}
                   >
                     GIF 다운로드
                   </button>
                 </>
               ) : (
-                <p className="status">상단 “재조립 GIF”로 draw order 스택을 확인하세요.</p>
+                <p className="status">drawOrder 변경 후 GIF로 스택을 확인하세요.</p>
               )}
             </div>
+
+            {(project?.hiddenRegions?.length ?? 0) > 0 && (
+              <div className="hidden-list">
+                <h2>히든 마커</h2>
+                <ul>
+                  {(project?.hiddenRegions ?? []).map((h) => {
+                    const part = project?.parts.find((p) => p.id === h.partId);
+                    return (
+                      <li key={h.id}>
+                        <span>
+                          {part?.name ?? h.partId} · {h.inpaint}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() =>
+                            setProject((prev) =>
+                              prev ? removeHiddenMarker(prev, h.id) : prev,
+                            )
+                          }
+                        >
+                          삭제
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
           </aside>
         </div>
+
+        {project && (
+          <PartsTable
+            project={project}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onChange={handlePartChange}
+            onMoveOrder={(id, dir) =>
+              setProject((prev) => (prev ? moveDrawOrder(prev, id, dir) : prev))
+            }
+          />
+        )}
 
         <input
           ref={fileRef}

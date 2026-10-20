@@ -38,6 +38,28 @@ PART_SEEDS: list[tuple[str, float, float, int]] = [
     ("right_foot", 0.34, 0.95, 7),
 ]
 
+DEFAULT_PARENT = {
+    "pelvis": "root",
+    "torso": "pelvis",
+    "vest": "torso",
+    "sash": "pelvis",
+    "head": "torso",
+    "hair": "head",
+    "hat": "head",
+    "left_upper_arm": "torso",
+    "left_forearm": "left_upper_arm",
+    "left_hand": "left_forearm",
+    "right_upper_arm": "torso",
+    "right_forearm": "right_upper_arm",
+    "right_hand": "right_forearm",
+    "left_thigh": "pelvis",
+    "left_lower_leg": "left_thigh",
+    "left_foot": "left_lower_leg",
+    "right_thigh": "pelvis",
+    "right_lower_leg": "right_thigh",
+    "right_foot": "right_lower_leg",
+}
+
 PALETTE = [
     "#E8A54B",
     "#3DB8A0",
@@ -187,7 +209,7 @@ def _compact_ids(
                 "name": name,
                 "drawOrder": draw,
                 "color": PALETTE[(new_id - 1) % len(PALETTE)],
-                "parent": None,
+                "parent": DEFAULT_PARENT.get(name),
                 "pivot": {
                     "x": float(xs.mean() / max(1, w - 1)),
                     "y": float(ys.mean() / max(1, h - 1)),

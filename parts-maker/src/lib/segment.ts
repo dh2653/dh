@@ -152,7 +152,7 @@ export function proposePartsLocal(source: ImageData): ProjectState {
 
   const labels = new Uint16Array(w * h);
   if (seeds.length === 0) {
-    return { width: w, height: h, source, labels, parts: [] };
+    return { width: w, height: h, source, labels, parts: [], hiddenRegions: [] };
   }
 
   // Dijkstra-like region grow with color+edge cost
@@ -262,7 +262,7 @@ export function proposePartsLocal(source: ImageData): ProjectState {
     color: partColor(i),
   }));
 
-  return { width: w, height: h, source, labels, parts: finalParts };
+  return { width: w, height: h, source, labels, parts: finalParts, hiddenRegions: [] };
 }
 
 /** @deprecated use proposePartsLocal — kept for call sites during migration */

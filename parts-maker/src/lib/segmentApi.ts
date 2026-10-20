@@ -55,6 +55,7 @@ export async function proposePartsViaApi(
       source,
       labels,
       parts: data.parts,
+      hiddenRegions: [],
     },
     info: { engine: data.engine, via: "api" },
   };

@@ -57,16 +57,27 @@ export async function exportPartsZip(project: ProjectState): Promise<void> {
   if (!folder) throw new Error("zip folder failed");
 
   const meta = {
-    version: 1,
+    version: 2,
     width: project.width,
     height: project.height,
-    parts: project.parts.map((p) => ({
-      id: p.id,
-      name: p.name,
-      drawOrder: p.drawOrder,
-      parent: p.parent,
-      pivot: p.pivot,
-      color: p.color,
+    parts: [...project.parts]
+      .sort((a, b) => a.drawOrder - b.drawOrder)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        drawOrder: p.drawOrder,
+        parent: p.parent,
+        pivot: p.pivot,
+        color: p.color,
+      })),
+    hiddenRegions: (project.hiddenRegions ?? []).map((h) => ({
+      id: h.id,
+      partId: h.partId,
+      x: h.x,
+      y: h.y,
+      radius: h.radius,
+      note: h.note,
+      inpaint: h.inpaint,
     })),
   };
   folder.file("parts.json", JSON.stringify(meta, null, 2));
