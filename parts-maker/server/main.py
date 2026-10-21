@@ -1,4 +1,4 @@
-"""Local API for parts-maker: segment + multi-view."""
+"""Local API for parts-maker: segment + multi-view + depth/3D."""
 
 from __future__ import annotations
 
@@ -7,10 +7,11 @@ import base64
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from depth_engine import estimate_depth
 from segment_engine import propose_parts
 from view_engine import generate_views
 
-app = FastAPI(title="parts-maker-api", version="0.3.0")
+app = FastAPI(title="parts-maker-api", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,6 +26,7 @@ def health():
         "ok": True,
         "engine": "rembg:u2net+watershed",
         "views": "geometric-proxy (Replicate hook if env set)",
+        "depth": "depth-anything-v2-small-onnx (heuristic fallback)",
     }
 
 
@@ -48,10 +50,22 @@ async def views(file: UploadFile = File(...), max_side: int = 720):
     try:
         return generate_views(raw, max_side=max_side)
     except Exception as e:
-        # Never take down the app — client falls back / keeps front only
         return {
             "engine": "error",
             "error": str(e),
             "views": [],
             "note": "view generation failed; use front image only or upload per-angle",
+        }
+
+
+@app.post("/depth")
+async def depth(file: UploadFile = File(...), max_side: int = 512):
+    raw = await file.read()
+    try:
+        return estimate_depth(raw, max_side=max_side)
+    except Exception as e:
+        return {
+            "engine": "error",
+            "error": str(e),
+            "note": "depth failed — 3D preview unavailable",
         }

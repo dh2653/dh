@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import "./App.css";
 import { PartsTable } from "./components/PartsTable";
+import { Viewer3D } from "./components/Viewer3D";
 import { ViewStrip } from "./components/ViewStrip";
+import { fetchDepth, revokeDepthResult, type DepthResult } from "./lib/depth";
 import { downloadReassemblyGif, exportPartsZip, buildReassemblyGif } from "./lib/export";
 import {
   addHiddenMarker,
@@ -48,6 +50,8 @@ export default function App() {
     Partial<Record<ViewId, ProjectState>>
   >({});
   const [sourceBlob, setSourceBlob] = useState<Blob | null>(null);
+  const [depthResult, setDepthResult] = useState<DepthResult | null>(null);
+  const [depthBusy, setDepthBusy] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const painting = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -99,7 +103,10 @@ export default function App() {
   }, [gifUrl]);
 
   useEffect(() => {
-    return () => revokeViewUrls(viewSlots);
+    return () => {
+      revokeViewUrls(viewSlots);
+      revokeDepthResult(depthResult);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -292,7 +299,7 @@ export default function App() {
         source: prev.source,
       };
       const result = fn(draft);
-      const next = result ?? draft;
+      const next: ProjectState = (result as ProjectState | undefined) ?? draft;
       projectRef.current = next;
       setProjectsByView((map) => {
         const m = { ...map, [activeViewRef.current]: next };
@@ -442,7 +449,7 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Phase 3 · 다각도 썸네일 → 뷰별 파츠 파이프라인 · rembg + Spine 메타
+              Phase 4 · 다각도 파츠 + Depth Anything 3D 미리보기 (오빗 메시)
             </p>
             <input
               ref={fileRef}
@@ -661,6 +668,38 @@ export default function App() {
                 파츠 추가
               </button>
             </div>
+
+            <Viewer3D
+              depth={depthResult}
+              busy={depthBusy}
+              onBuild={() => {
+                const slot = viewSlotsRef.current.find(
+                  (s) => s.id === activeViewRef.current,
+                );
+                const blob = slot?.blob;
+                if (!blob) {
+                  setStatus("3D용 뷰 이미지가 없습니다.");
+                  return;
+                }
+                setDepthBusy(true);
+                setStatus("Depth Anything로 깊이 추정 중…");
+                void (async () => {
+                  try {
+                    const next = await fetchDepth(blob);
+                    revokeDepthResult(depthResult);
+                    setDepthResult(next);
+                    setStatus(
+                      `3D 메시 준비 · ${next.engine.startsWith("depth-anything") ? "실제 깊이" : "스텁"} (${next.engine})`,
+                    );
+                  } catch (e) {
+                    console.error(e);
+                    setStatus("깊이 추정 실패 · API(/depth)와 모델 다운로드를 확인하세요.");
+                  } finally {
+                    setDepthBusy(false);
+                  }
+                })();
+              }}
+            />
 
             <div className="preview-block">
               <h2>재조립 GIF · {activeViewId}</h2>

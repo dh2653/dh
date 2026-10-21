@@ -21,7 +21,13 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/views/, "/views"),
       },
+      "/api/depth": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/depth/, "/depth"),
+      },
     },
   },
 });
+
 

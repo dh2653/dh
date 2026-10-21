@@ -663,3 +663,76 @@
 .view-engine {
   margin: 0.45rem 0 0;
 }
+
+/* —— Phase 4 3D —— */
+.viewer3d {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.viewer3d-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.viewer3d-head h2 {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  margin: 0;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+
+.viewer3d-head .btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+.viewer3d-canvas {
+  width: 100%;
+  height: 240px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0f1824;
+  touch-action: none;
+}
+
+.viewer3d-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.viewer3d-maps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.viewer3d-maps figure {
+  margin: 0;
+}
+
+.viewer3d-maps img {
+  width: 100%;
+  display: block;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: #0f1824;
+}
+
+.viewer3d-maps figcaption {
+  font-size: 0.7rem;
+  color: var(--paper-dim);
+  margin-top: 0.15rem;
+}
+
+.viewer3d-engine.real {
+  color: var(--teal);
+}
