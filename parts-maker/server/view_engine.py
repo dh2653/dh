@@ -18,32 +18,16 @@ from typing import Any
 import cv2
 import numpy as np
 from PIL import Image
-from rembg import new_session, remove
 
-from segment_engine import crop_and_fit_foreground
+from segment_engine import DEFAULT_REMBG_MODEL, cutout_character
 
 VIEW_ORDER = ("front", "left", "right", "up", "down")
-
-_session = None
-
-
-def get_session(model: str = "u2net"):
-    global _session
-    if _session is None:
-        _session = new_session(model)
-    return _session
 
 
 def _png_bytes(img: Image.Image) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
-
-
-def _cutout(rgba_in: Image.Image) -> np.ndarray:
-    session = get_session("u2net")
-    cut = remove(rgba_in, session=session)
-    return np.array(cut)
 
 
 def _composite_on_paper(rgba: np.ndarray) -> Image.Image:
@@ -212,12 +196,9 @@ def generate_views(
             ],
         }
 
-    rgba = _cutout(img)
-    alpha = rgba[:, :, 3]
-    fg = alpha > 40
-    rgba, fg = crop_and_fit_foreground(rgba, fg, max_side=max_side)
-    rgba[~fg, :3] = 0
-    rgba[~fg, 3] = 0
+    rgba, _fg, _tag = cutout_character(
+        _png_bytes(img), max_side=max_side, model=DEFAULT_REMBG_MODEL
+    )
     warped = _geometric_views(rgba)
     views = []
     for vid in VIEW_ORDER:

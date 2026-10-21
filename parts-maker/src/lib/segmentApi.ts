@@ -36,7 +36,7 @@ export async function proposePartsViaApi(
   form.append("file", file, "character.png");
   const qs = new URLSearchParams({
     max_side: String(opts?.maxSide ?? 720),
-    model: opts?.model ?? "u2net",
+    model: opts?.model ?? "isnet-general-use",
   });
   const res = await fetch(`/api/segment?${qs}`, {
     method: "POST",

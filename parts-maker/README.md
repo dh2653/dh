@@ -44,7 +44,7 @@ npm run dev:all
 
 ## Phase 1–3
 
-- rembg 세그 · 브러시 · Spine 테이블 · 히든 마커  
+- rembg(isnet) + 캐릭터 격리(배경 제외) · 브러시 · Spine 테이블 · 히든 마커  
 - 다각도 썸네일 (geometric-proxy + Replicate 훅)  
 
 ## 스모크

@@ -8,10 +8,10 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from depth_engine import estimate_depth
-from segment_engine import propose_parts
+from segment_engine import DEFAULT_REMBG_MODEL, propose_parts
 from view_engine import generate_views
 
-app = FastAPI(title="parts-maker-api", version="0.4.0")
+app = FastAPI(title="parts-maker-api", version="0.4.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,14 +24,18 @@ app.add_middleware(
 def health():
     return {
         "ok": True,
-        "engine": "rembg:u2net+watershed",
+        "engine": f"rembg:{DEFAULT_REMBG_MODEL}+isolate+watershed",
         "views": "geometric-proxy (Replicate hook if env set)",
         "depth": "depth-anything-v2-small-onnx (heuristic fallback)",
     }
 
 
 @app.post("/segment")
-async def segment(file: UploadFile = File(...), max_side: int = 720, model: str = "u2net"):
+async def segment(
+    file: UploadFile = File(...),
+    max_side: int = 720,
+    model: str = DEFAULT_REMBG_MODEL,
+):
     raw = await file.read()
     result = propose_parts(raw, max_side=max_side, model=model)
     return {

@@ -4,7 +4,7 @@ import type { PartMeta, ProjectState } from "../types";
 /**
  * Client editing helpers + offline fallback segmentation.
  *
- * Preferred path: `proposePartsViaApi` → rembg(U2Net) + OpenCV watershed (server/).
+ * Preferred path: `proposePartsViaApi` → rembg + character isolate + watershed (server/).
  * Fallback here: edge flood-fill FG + marker watershed (no neural net).
  *
  * SAM plug-in: replace server `propose_parts` or the API response mapper;

@@ -20,9 +20,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
-from rembg import new_session, remove
-
-from segment_engine import crop_and_fit_foreground
+from segment_engine import DEFAULT_REMBG_MODEL, cutout_character
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 MODEL_PATH = MODELS_DIR / "depth_anything_v2_vits.onnx"
@@ -32,7 +30,6 @@ MODEL_URL = (
 )
 
 _session = None
-_rembg = None
 
 
 def ensure_model() -> bool:
@@ -57,13 +54,6 @@ def get_ort():
             str(MODEL_PATH), providers=["CPUExecutionProvider"]
         )
     return _session
-
-
-def get_rembg():
-    global _rembg
-    if _rembg is None:
-        _rembg = new_session("u2net")
-    return _rembg
 
 
 def _png_b64(img: Image.Image) -> str:
@@ -120,20 +110,9 @@ def _run_depth_anything(rgb: np.ndarray) -> np.ndarray:
 
 
 def estimate_depth(image_bytes: bytes, *, max_side: int = 512) -> dict[str, Any]:
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
-    scale = min(1.0, max_side / max(img.size))
-    if scale < 1:
-        img = img.resize(
-            (max(1, int(img.width * scale)), max(1, int(img.height * scale))),
-            Image.Resampling.LANCZOS,
-        )
-    cut = remove(img, session=get_rembg())
-    rgba = np.array(cut)
-    alpha = rgba[:, :, 3]
-    fg = alpha > 40
-    rgba, fg = crop_and_fit_foreground(rgba, fg, max_side=max_side)
-    rgba[~fg, :3] = 0
-    rgba[~fg, 3] = 0
+    rgba, _fg, _tag = cutout_character(
+        image_bytes, max_side=max_side, model=DEFAULT_REMBG_MODEL
+    )
     rgb = rgba[:, :, :3]
     alpha = rgba[:, :, 3]
 
