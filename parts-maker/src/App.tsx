@@ -4,7 +4,12 @@ import { PartsTable } from "./components/PartsTable";
 import { Viewer3D } from "./components/Viewer3D";
 import { ViewStrip } from "./components/ViewStrip";
 import { fetchDepth, revokeDepthResult, type DepthResult } from "./lib/depth";
-import { downloadReassemblyGif, exportPartsZip, buildReassemblyGif } from "./lib/export";
+import {
+  downloadReassemblyGif,
+  exportPartsPsd,
+  exportPartsZip,
+  buildReassemblyGif,
+} from "./lib/export";
 import {
   addHiddenMarker,
   applyLightInpaint,
@@ -399,6 +404,18 @@ export default function App() {
     setStatus(`parts-export-${activeViewId}.zip 완료`);
   };
 
+  const handleExportPsd = async () => {
+    if (!project) return;
+    setStatus("PSD 레이어 + parts.json 생성 중…");
+    try {
+      await exportPartsPsd(project, { viewId: activeViewId });
+      setStatus(`parts-psd-${activeViewId}.zip 완료 (레이어 PSD + 메타 JSON)`);
+    } catch (e) {
+      console.error(e);
+      setStatus("PSD보내기 실패");
+    }
+  };
+
   const handleGif = async () => {
     if (!project) return;
     setStatus("재조립 GIF 생성 중…");
@@ -449,7 +466,7 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Phase 4 · 다각도 파츠 + Depth Anything 3D 미리보기 (오빗 메시)
+              Phase 4+ · 다각도·3D 미리보기 · PSD 레이어보내기 (포토샵/클립)
             </p>
             <input
               ref={fileRef}
@@ -499,11 +516,19 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-ghost"
               disabled={!project}
               onClick={() => void handleExportZip()}
             >
               PNG zip
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!project}
+              onClick={() => void handleExportPsd()}
+            >
+              PSD보내기
             </button>
           </div>
         </header>

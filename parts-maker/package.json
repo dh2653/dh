@@ -11,9 +11,11 @@
     "preview": "vite preview",
     "lint": "tsc -b --pretty false",
     "smoke:phase3": "node scripts/smoke-phase3.mjs",
-    "smoke:phase4": "node scripts/smoke-phase4.mjs"
+    "smoke:phase4": "node scripts/smoke-phase4.mjs",
+    "smoke:psd": "node scripts/smoke-psd.mjs"
   },
   "dependencies": {
+    "ag-psd": "^31.0.3",
     "file-saver": "^2.0.5",
     "gifenc": "^1.0.3",
     "jszip": "^3.10.1",
