@@ -1,6 +1,6 @@
 # 파츠 제작 (Parts Maker)
 
-업로드 → 다각도 뷰 → 뷰별 파츠/Spine 메타 → Depth Anything 3D 미리보기 → **PNG zip / PSD 레이어 / 재조립 GIF**.
+업로드 → 다각도 뷰 → 뷰별 파츠/Spine 메타 → Depth Anything 3D 미리보기 → **PNG zip / 파츠이미지다운 / 재조립 GIF**.
 
 ## 실행
 
@@ -16,13 +16,13 @@ npm run dev:all
 
 최초 `/api/depth` 호출 시 Depth Anything V2 Small ONNX(~95MB)를 `server/models/`에 받습니다 (git 제외).
 
-## PSD 레이어보내기
+## 파츠이미지다운
 
-상단 **「PSD보내기」** → `parts-psd-{view}.zip`  
-- `parts-{view}.psd` — 파츠당 1 래스터 레이어, 이름 `{drawOrder}_{name}`, 스택 = drawOrder (아래→위)  
+상단 **「파츠이미지다운」** → `parts-psd-{view}.zip`  
+- `parts-{view}.psd` — 파츠당 1장(레이어), 이름 `{drawOrder}_{name}`, 스택 = drawOrder (아래→위)  
 - `parts.json` — pivot / parent / drawOrder / hiddenRegions 사이드카  
 
-라이브러리: **ag-psd** (브라우저 작성).
+포맷은 편의상 PSD 컨테이너(ag-psd). 포토샵으로 “전송”하는 기능이 아니라 **파츠 이미지를 내려받는 것**입니다.
 
 ### 한계 (정직하게)
 

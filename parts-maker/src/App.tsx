@@ -406,13 +406,13 @@ export default function App() {
 
   const handleExportPsd = async () => {
     if (!project) return;
-    setStatus("PSD 레이어 + parts.json 생성 중…");
+    setStatus("파츠 이미지 + parts.json 생성 중…");
     try {
       await exportPartsPsd(project, { viewId: activeViewId });
-      setStatus(`parts-psd-${activeViewId}.zip 완료 (레이어 PSD + 메타 JSON)`);
+      setStatus(`parts-psd-${activeViewId}.zip 완료 (파츠 이미지 + 메타 JSON)`);
     } catch (e) {
       console.error(e);
-      setStatus("PSD보내기 실패");
+      setStatus("파츠이미지다운 실패");
     }
   };
 
@@ -466,7 +466,7 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Phase 4+ · 다각도·3D 미리보기 · PSD 레이어보내기 (포토샵/클립)
+              Phase 4+ · 다각도·3D 미리보기 · 파츠이미지다운 (포토샵/클립)
             </p>
             <input
               ref={fileRef}
@@ -528,7 +528,7 @@ export default function App() {
               disabled={!project}
               onClick={() => void handleExportPsd()}
             >
-              PSD보내기
+              파츠이미지다운
             </button>
           </div>
         </header>
