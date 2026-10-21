@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import "./App.css";
 import { PartsTable } from "./components/PartsTable";
+import { PromptStudio } from "./components/PromptStudio";
 import { Viewer3D } from "./components/Viewer3D";
 import { ViewStrip } from "./components/ViewStrip";
 import { fetchDepth, revokeDepthResult, type DepthResult } from "./lib/depth";
@@ -34,7 +35,7 @@ import {
 import type { AppStep, PartMeta, ProjectState, Tool } from "./types";
 
 export default function App() {
-  const [step, setStep] = useState<AppStep>("landing");
+  const [step, setStep] = useState<AppStep>("prompt");
   const [project, setProject] = useState<ProjectState | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
@@ -425,16 +426,29 @@ export default function App() {
     setStatus(`재조립 GIF (${activeViewId}) 준비됨`);
   };
 
-  if (step === "landing") {
+  if (step === "prompt") {
+    return (
+      <div className="app">
+        <PromptStudio
+          onOpenLegacyEditor={() => {
+            setStep("landing");
+            setStatus("이미지를 올리면 자동 분할(실험)을 시작합니다.");
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (step === "landing" || !project) {
     return (
       <div className="app">
         <section className="landing">
           <div className="landing-inner">
             <h1 className="brand">파츠 제작</h1>
-            <p className="headline">캐릭터를 올리고, 파츠로 쪼개세요.</p>
+            <p className="headline">실험: 자동 분할 에디터</p>
             <p className="sub">
-              다각도 뷰를 만든 뒤 각도별 파츠를 분리하고, Spine 메타와 재조립 GIF로
-              검증합니다.
+              픽셀 자동 분리는 퀄리티가 낮을 수 있습니다. 메인 기능은 챗지 재생성
+              프롬프트입니다.
             </p>
             <div className="cta-row">
               <button
@@ -448,26 +462,12 @@ export default function App() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                disabled={busy}
-                onClick={() => {
-                  void (async () => {
-                    try {
-                      const res = await fetch("/demo-character.png");
-                      if (!res.ok) throw new Error("sample missing");
-                      await runPipeline(await res.blob());
-                    } catch (e) {
-                      console.error(e);
-                      setStatus("샘플 로드 실패");
-                    }
-                  })();
-                }}
+                onClick={() => setStep("prompt")}
               >
-                샘플로 체험
+                ← 프롬프트 도구로
               </button>
             </div>
-            <p className="hint">
-              Phase 4+ · 다각도·3D 미리보기 · 파츠이미지다운 (포토샵/클립)
-            </p>
+            <p className="hint">실험용 · watershed 자동 분할</p>
             <input
               ref={fileRef}
               className="hidden-file"

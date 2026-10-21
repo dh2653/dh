@@ -739,3 +739,100 @@
 .viewer3d-engine.real {
   color: var(--teal);
 }
+
+/* —— Prompt studio (ChatGPT regen) —— */
+.prompt-studio {
+  flex: 1;
+  padding: clamp(1.25rem, 3vw, 2.5rem);
+  overflow: auto;
+}
+
+.prompt-studio-inner {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.prompt-head .sub strong {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.prompt-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) 1fr;
+  gap: clamp(1.25rem, 3vw, 2rem);
+  margin-top: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .prompt-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.prompt-preview-frame {
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, #1a2430 25%, transparent 25%) 0 0 / 16px 16px,
+    linear-gradient(-45deg, #1a2430 25%, transparent 25%) 0 8px / 16px 16px,
+    #0f1824;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  margin-bottom: 0.85rem;
+}
+
+.prompt-preview-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.prompt-empty {
+  color: var(--paper-dim);
+  font-size: 0.9rem;
+}
+
+.prompt-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+  color: var(--paper-dim);
+  font-size: 0.85rem;
+}
+
+.prompt-form textarea,
+.prompt-form select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #0f1824;
+  color: var(--paper);
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.prompt-form .prompt-out {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  min-height: 280px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.legacy-link {
+  margin-top: 0.75rem;
+  opacity: 0.75;
+  font-size: 0.85rem;
+}

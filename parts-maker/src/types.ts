@@ -44,4 +44,4 @@ export type Tool =
   | "pivot"
   | "hidden";
 
-export type AppStep = "landing" | "workspace";
+export type AppStep = "prompt" | "landing" | "workspace";

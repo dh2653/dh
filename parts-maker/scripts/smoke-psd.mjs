@@ -36,7 +36,12 @@ console.log("zip entries", names);
 
 const psdEntry = names.find((n) => n.endsWith(".psd"));
 const jsonEntry = names.find((n) => n.endsWith(".json"));
+const pngEntries = names.filter((n) => n.startsWith("png/") && n.endsWith(".png"));
+const preview = names.find((n) => n.includes("preview-composite"));
 if (!psdEntry || !jsonEntry) throw new Error("missing psd or json");
+if (!pngEntries.length) throw new Error("missing png/ part images");
+if (!preview) throw new Error("missing preview-composite.png");
+console.log("png parts", pngEntries.length, "preview", preview);
 
 const psdBuf = await zip.file(psdEntry).async("nodebuffer");
 fs.writeFileSync(path.join(OUT, "parts-front.psd"), psdBuf);

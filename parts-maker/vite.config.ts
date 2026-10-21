@@ -6,6 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      "/api/cutout": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/cutout/, "/cutout"),
+      },
       "/api/segment": {
         target: "http://127.0.0.1:8787",
         changeOrigin: true,
