@@ -220,6 +220,53 @@ def _compact_ids(
     return out, parts
 
 
+def crop_and_fit_foreground(
+    rgba: np.ndarray,
+    fg: np.ndarray,
+    *,
+    max_side: int = 720,
+    pad_ratio: float = 0.06,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Tight-crop to FG bbox (with padding), then upscale so the subject fills the canvas.
+
+    Fixes uploads where the character sits in a large scene/icon frame and appears
+    tiny at the bottom of the workspace.
+    """
+    ys, xs = np.where(fg)
+    if len(xs) == 0:
+        return rgba, fg
+    min_x, max_x = int(xs.min()), int(xs.max())
+    min_y, max_y = int(ys.min()), int(ys.max())
+    bw = max(1, max_x - min_x + 1)
+    bh = max(1, max_y - min_y + 1)
+    pad = int(max(bw, bh) * pad_ratio) + 8
+    h, w = fg.shape
+    x0 = max(0, min_x - pad)
+    y0 = max(0, min_y - pad)
+    x1 = min(w, max_x + pad + 1)
+    y1 = min(h, max_y + pad + 1)
+    rgba = rgba[y0:y1, x0:x1].copy()
+    fg = fg[y0:y1, x0:x1].copy()
+
+    ch, cw = fg.shape
+    side = max(cw, ch)
+    if side < 32:
+        return rgba, fg
+    # Fit longest side to max_side (upscale small subjects, downscale huge ones)
+    scale = max_side / side
+    if abs(scale - 1.0) > 0.02:
+        nw = max(1, int(round(cw * scale)))
+        nh = max(1, int(round(ch * scale)))
+        rgba = cv2.resize(rgba, (nw, nh), interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC)
+        fg_u8 = cv2.resize(
+            fg.astype(np.uint8) * 255,
+            (nw, nh),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        fg = fg_u8 > 127
+    return rgba, fg
+
+
 def propose_parts(
     image_bytes: bytes,
     *,
@@ -227,7 +274,9 @@ def propose_parts(
     model: str = "u2net",
 ) -> SegmentResult:
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
-    scale = min(1.0, max_side / max(img.size))
+    # Keep enough resolution for rembg; final fit happens after FG crop
+    pre_side = max(max_side, 900)
+    scale = min(1.0, pre_side / max(img.size))
     if scale < 1:
         img = img.resize(
             (max(1, int(img.width * scale)), max(1, int(img.height * scale))),
@@ -244,6 +293,11 @@ def propose_parts(
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     fg = cv2.morphologyEx(fg.astype(np.uint8), cv2.MORPH_OPEN, k).astype(bool)
     fg = cv2.morphologyEx(fg.astype(np.uint8), cv2.MORPH_CLOSE, k).astype(bool)
+
+    rgba, fg = crop_and_fit_foreground(rgba, fg, max_side=max_side)
+    # Clear RGB outside FG so leftover scene doesn't confuse watershed
+    rgba[~fg, :3] = 0
+    rgba[~fg, 3] = 0
 
     bgr = cv2.cvtColor(rgba[:, :, :3], cv2.COLOR_RGB2BGR)
     raw_labels, used = _watershed_parts(bgr, fg)

@@ -245,7 +245,10 @@
 
 .canvas-stage canvas {
   max-width: 100%;
+  max-height: min(68vh, 720px);
+  width: auto;
   height: auto;
+  object-fit: contain;
   cursor: crosshair;
   image-rendering: auto;
   box-shadow: var(--shadow);

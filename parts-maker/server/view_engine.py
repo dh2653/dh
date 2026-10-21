@@ -20,6 +20,8 @@ import numpy as np
 from PIL import Image
 from rembg import new_session, remove
 
+from segment_engine import crop_and_fit_foreground
+
 VIEW_ORDER = ("front", "left", "right", "up", "down")
 
 _session = None
@@ -211,6 +213,11 @@ def generate_views(
         }
 
     rgba = _cutout(img)
+    alpha = rgba[:, :, 3]
+    fg = alpha > 40
+    rgba, fg = crop_and_fit_foreground(rgba, fg, max_side=max_side)
+    rgba[~fg, :3] = 0
+    rgba[~fg, 3] = 0
     warped = _geometric_views(rgba)
     views = []
     for vid in VIEW_ORDER:

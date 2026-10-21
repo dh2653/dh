@@ -22,6 +22,8 @@ import onnxruntime as ort
 from PIL import Image
 from rembg import new_session, remove
 
+from segment_engine import crop_and_fit_foreground
+
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 MODEL_PATH = MODELS_DIR / "depth_anything_v2_vits.onnx"
 MODEL_URL = (
@@ -127,6 +129,11 @@ def estimate_depth(image_bytes: bytes, *, max_side: int = 512) -> dict[str, Any]
         )
     cut = remove(img, session=get_rembg())
     rgba = np.array(cut)
+    alpha = rgba[:, :, 3]
+    fg = alpha > 40
+    rgba, fg = crop_and_fit_foreground(rgba, fg, max_side=max_side)
+    rgba[~fg, :3] = 0
+    rgba[~fg, 3] = 0
     rgb = rgba[:, :, :3]
     alpha = rgba[:, :, 3]
 

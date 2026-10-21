@@ -118,11 +118,58 @@ function luminanceAt(px: Uint8ClampedArray, i: number): number {
   return 0.299 * px[o]! + 0.587 * px[o + 1]! + 0.114 * px[o + 2]!;
 }
 
+/** Crop + fit FG so icon/scene uploads don't leave huge empty canvas. */
+function cropFitForeground(source: ImageData, maxSide = 720): ImageData {
+  const bg = markBackground(source);
+  const box = fgBBox(bg, source.width, source.height);
+  const pad = Math.floor(Math.max(box.maxX - box.minX, box.maxY - box.minY) * 0.06) + 8;
+  const x0 = Math.max(0, box.minX - pad);
+  const y0 = Math.max(0, box.minY - pad);
+  const x1 = Math.min(source.width - 1, box.maxX + pad);
+  const y1 = Math.min(source.height - 1, box.maxY + pad);
+  const cw = x1 - x0 + 1;
+  const ch = y1 - y0 + 1;
+  const cropped = new ImageData(cw, ch);
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const si = ((y0 + y) * source.width + (x0 + x)) * 4;
+      const di = (y * cw + x) * 4;
+      // Drop near-bg pixels
+      const bi = (y0 + y) * source.width + (x0 + x);
+      if (bg[bi]) {
+        cropped.data[di + 3] = 0;
+        continue;
+      }
+      cropped.data[di] = source.data[si]!;
+      cropped.data[di + 1] = source.data[si + 1]!;
+      cropped.data[di + 2] = source.data[si + 2]!;
+      cropped.data[di + 3] = source.data[si + 3]!;
+    }
+  }
+  const side = Math.max(cw, ch);
+  const scale = maxSide / Math.max(1, side);
+  if (Math.abs(scale - 1) < 0.02) return cropped;
+  const nw = Math.max(1, Math.round(cw * scale));
+  const nh = Math.max(1, Math.round(ch * scale));
+  const c = document.createElement("canvas");
+  c.width = nw;
+  c.height = nh;
+  const tmp = document.createElement("canvas");
+  tmp.width = cw;
+  tmp.height = ch;
+  tmp.getContext("2d")!.putImageData(cropped, 0, 0);
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(tmp, 0, 0, nw, nh);
+  return ctx.getImageData(0, 0, nw, nh);
+}
+
 /**
  * Offline fallback: anatomical seed markers + priority-flood (edge-aware),
  * replacing the old k-means stub.
  */
-export function proposePartsLocal(source: ImageData): ProjectState {
+export function proposePartsLocal(sourceIn: ImageData): ProjectState {
+  const source = cropFitForeground(sourceIn);
   const { width: w, height: h, data: px } = source;
   const bg = markBackground(source);
   const box = fgBBox(bg, w, h);
