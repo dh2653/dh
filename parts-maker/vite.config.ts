@@ -16,6 +16,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: () => "/health",
       },
+      "/api/views": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/views/, "/views"),
+      },
     },
   },
 });
+

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import "./App.css";
 import { PartsTable } from "./components/PartsTable";
+import { ViewStrip } from "./components/ViewStrip";
 import { downloadReassemblyGif, exportPartsZip, buildReassemblyGif } from "./lib/export";
 import {
   addHiddenMarker,
@@ -15,12 +16,14 @@ import {
 } from "./lib/meta";
 import { proposePartsBest } from "./lib/propose";
 import { drawProject } from "./lib/render";
+import { addPart, floodFill, paintBrush } from "./lib/segment";
 import {
-  addPart,
-  floodFill,
-  paintBrush,
-  proposePartsLocal,
-} from "./lib/segment";
+  emptyViewSlots,
+  generateViewSlots,
+  revokeViewUrls,
+  type ViewId,
+  type ViewSlot,
+} from "./lib/views";
 import type { AppStep, PartMeta, ProjectState, Tool } from "./types";
 
 export default function App() {
@@ -39,9 +42,23 @@ export default function App() {
   const [status, setStatus] = useState("이미지를 올리면 파츠를 제안합니다.");
   const [gifUrl, setGifUrl] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [viewSlots, setViewSlots] = useState<ViewSlot[]>(emptyViewSlots);
+  const [activeViewId, setActiveViewId] = useState<ViewId>("front");
+  const [projectsByView, setProjectsByView] = useState<
+    Partial<Record<ViewId, ProjectState>>
+  >({});
+  const [sourceBlob, setSourceBlob] = useState<Blob | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const painting = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const projectsRef = useRef(projectsByView);
+  const activeViewRef = useRef(activeViewId);
+  const projectRef = useRef(project);
+  const viewSlotsRef = useRef(viewSlots);
+  projectsRef.current = projectsByView;
+  activeViewRef.current = activeViewId;
+  projectRef.current = project;
+  viewSlotsRef.current = viewSlots;
 
   const redraw = (proj: ProjectState) => {
     const canvas = canvasRef.current;
@@ -81,38 +98,176 @@ export default function App() {
     };
   }, [gifUrl]);
 
-  const runPropose = async (blob: Blob) => {
+  useEffect(() => {
+    return () => revokeViewUrls(viewSlots);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const commitProject = (next: ProjectState | null, viewId?: ViewId) => {
+    const vid = viewId ?? activeViewRef.current;
+    setProject(next);
+    projectRef.current = next;
+    if (next) {
+      setProjectsByView((prev) => {
+        const map = { ...prev, [vid]: next };
+        projectsRef.current = map;
+        return map;
+      });
+    }
+  };
+
+  const segmentBlob = async (blob: Blob, viewId: ViewId, label: string) => {
     setBusy(true);
-    setStatus("U2Net 배경 분리 · 파츠·피벗·히든 마커 추정 중…");
+    setStatus(`${label} 뷰 · U2Net 파츠·메타 추정 중…`);
     try {
-      await new Promise((r) => setTimeout(r, 30));
       const { project: next, info } = await proposePartsBest(blob);
       startTransition(() => {
-        setProject(next);
+        commitProject(next, viewId);
         setSelectedId(next.parts[0]?.id ?? null);
         setStep("workspace");
+        setGifUrl(null);
         const engineLabel =
-          info.via === "api"
-            ? `엔진 ${info.engine}`
-            : `오프라인 fallback (${info.engine})`;
+          info.via === "api" ? info.engine : `fallback (${info.engine})`;
         setStatus(
           next.parts.length
-            ? `${next.parts.length}개 파츠 · pivot/parent/hidden 추정 · ${engineLabel}`
-            : "전경을 찾지 못했습니다. 배경이 단순한 이미지를 올려 주세요.",
+            ? `${label} · ${next.parts.length}개 파츠 · ${engineLabel}`
+            : `${label} · 전경을 찾지 못했습니다.`,
         );
-        setGifUrl(null);
       });
     } catch (e) {
       console.error(e);
-      setStatus("처리 실패. 다른 이미지로 다시 시도해 주세요.");
+      setStatus(`${label} 뷰 처리 실패`);
     } finally {
       setBusy(false);
     }
   };
 
+  const runPipeline = async (blob: Blob) => {
+    setBusy(true);
+    setSourceBlob(blob);
+    setStatus("다각도 뷰 생성 중…");
+    revokeViewUrls(viewSlots);
+    setProjectsByView({});
+    projectsRef.current = {};
+    setActiveViewId("front");
+    activeViewRef.current = "front";
+
+    let slots: ViewSlot[] = emptyViewSlots();
+    let viewNote = "";
+    try {
+      const gen = await generateViewSlots(blob);
+      slots = gen.slots;
+      viewNote = gen.note ? ` · ${gen.note}` : ` · 뷰:${gen.engine}`;
+      setViewSlots(slots);
+    } catch (e) {
+      console.error(e);
+      // Keep going with front-only
+      const url = URL.createObjectURL(blob);
+      slots = emptyViewSlots().map((s) =>
+        s.id === "front"
+          ? { ...s, blob, url, status: "ready" as const, engine: "front-only" }
+          : s,
+      );
+      setViewSlots(slots);
+      viewNote = " · 뷰 생성 실패 → 정면만 사용";
+      setStatus("뷰 생성 실패 · 정면 이미지로 계속합니다.");
+    }
+
+    const frontBlob = slots.find((s) => s.id === "front")?.blob ?? blob;
+    setBusy(false);
+    await segmentBlob(frontBlob, "front", "정면");
+    setStatus((prev) => prev + viewNote);
+  };
+
   const onFile = (file: File | undefined) => {
     if (!file) return;
-    void runPropose(file);
+    void runPipeline(file);
+  };
+
+  const switchView = async (id: ViewId) => {
+    if (busy) return;
+    if (id === activeViewRef.current && projectsRef.current[id]) {
+      setStatus(`이미 ${id} 뷰입니다.`);
+      return;
+    }
+    const map = { ...projectsRef.current };
+    if (projectRef.current) map[activeViewRef.current] = projectRef.current;
+
+    setActiveViewId(id);
+    activeViewRef.current = id;
+    setGifUrl(null);
+    setProjectsByView(map);
+    projectsRef.current = map;
+
+    const slot = viewSlotsRef.current.find((s) => s.id === id);
+    if (map[id]) {
+      setProject(map[id]!);
+      projectRef.current = map[id]!;
+      setSelectedId(map[id]!.parts[0]?.id ?? null);
+      setStatus(`${slot?.label ?? id} 뷰로 전환 (캐시)`);
+      return;
+    }
+    if (!slot?.blob) {
+      setProject(null);
+      projectRef.current = null;
+      setStatus("이 각도 이미지가 없습니다. 업로드하거나 뷰를 다시 생성하세요.");
+      return;
+    }
+    await segmentBlob(slot.blob, id, slot.label);
+  };
+
+  const regenerateViews = async () => {
+    if (!sourceBlob) {
+      setStatus("원본 이미지가 없습니다.");
+      return;
+    }
+    setBusy(true);
+    setStatus("다각도 뷰 다시 생성 중…");
+    try {
+      revokeViewUrls(viewSlots);
+      const gen = await generateViewSlots(sourceBlob);
+      setViewSlots(gen.slots);
+      // Drop cached projects except we keep front if still same — clear all for honesty
+      setProjectsByView({});
+      projectsRef.current = {};
+      setActiveViewId("front");
+      activeViewRef.current = "front";
+      const front = gen.slots.find((s) => s.id === "front")?.blob ?? sourceBlob;
+      setBusy(false);
+      await segmentBlob(front, "front", "정면");
+      setStatus((s) => `${s} · 뷰 엔진 ${gen.engine}`);
+    } catch (e) {
+      console.error(e);
+      setStatus("뷰 재생성 실패 · 기존 정면 작업은 유지됩니다.");
+      setBusy(false);
+    }
+  };
+
+  const uploadView = (id: ViewId, file: File) => {
+    const url = URL.createObjectURL(file);
+    setViewSlots((prev) =>
+      prev.map((s) => {
+        if (s.id !== id) return s;
+        if (s.url) URL.revokeObjectURL(s.url);
+        return {
+          ...s,
+          blob: file,
+          url,
+          status: "ready",
+          engine: "user-upload",
+        };
+      }),
+    );
+    setProjectsByView((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      projectsRef.current = next;
+      return next;
+    });
+    setStatus(`${id} 뷰 이미지 교체됨 · 썸네일을 클릭해 파츠 분리`);
+    if (id === activeViewRef.current) {
+      void segmentBlob(file, id, id);
+    }
   };
 
   const canvasPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -137,7 +292,14 @@ export default function App() {
         source: prev.source,
       };
       const result = fn(draft);
-      return result ?? draft;
+      const next = result ?? draft;
+      projectRef.current = next;
+      setProjectsByView((map) => {
+        const m = { ...map, [activeViewRef.current]: next };
+        projectsRef.current = m;
+        return m;
+      });
+      return next;
     });
   };
 
@@ -156,10 +318,8 @@ export default function App() {
           pivot: { x: x / p.width, y: y / p.height },
         }),
       );
-      setStatus("피벗 위치를 갱신했습니다.");
       return;
     }
-
     if (tool === "hidden") {
       if (selectedId == null) {
         setStatus("히든 마커를 붙일 파츠를 선택하세요.");
@@ -168,14 +328,11 @@ export default function App() {
       mutateProject((p) =>
         addHiddenMarker(p, selectedId, x / p.width, y / p.height),
       );
-      setStatus("히든 영역 마커 추가 · ‘간단 인페인트’로 채울 수 있습니다.");
       return;
     }
-
     if (tool === "fill") {
-      const id = selectedId ?? 0;
       mutateProject((p) => {
-        floodFill(p, Math.floor(x), Math.floor(y), id);
+        floodFill(p, Math.floor(x), Math.floor(y), selectedId ?? 0);
       });
       return;
     }
@@ -206,38 +363,42 @@ export default function App() {
   };
 
   const handlePartChange = (id: number, patch: Partial<PartMeta>) => {
-    setProject((prev) => (prev ? updatePart(prev, id, patch) : prev));
+    if (!project) return;
+    const next = updatePart(project, id, patch);
+    commitProject(next);
   };
 
   const handleAddPart = () => {
-    setProject((prev) => {
-      if (!prev) return prev;
-      const copy = {
-        ...prev,
-        parts: [...prev.parts],
-        hiddenRegions: [...(prev.hiddenRegions ?? [])],
-      };
-      const part = addPart(copy);
-      setSelectedId(part.id);
-      setStatus(`새 파츠 “${part.name}” 추가`);
-      return copy;
-    });
+    if (!project) return;
+    const copy = {
+      ...project,
+      parts: [...project.parts],
+      hiddenRegions: [...(project.hiddenRegions ?? [])],
+    };
+    const part = addPart(copy);
+    commitProject(copy);
+    setSelectedId(part.id);
+    setStatus(`새 파츠 “${part.name}” 추가`);
   };
 
   const handleExportZip = async () => {
     if (!project) return;
     setStatus("PNG zip + parts.json 생성 중…");
-    await exportPartsZip(project);
-    setStatus("parts-export.zip 다운로드 완료 (메타 v2).");
+    const slot = viewSlots.find((s) => s.id === activeViewId);
+    await exportPartsZip(project, {
+      viewId: activeViewId,
+      viewBlob: slot?.blob ?? null,
+    });
+    setStatus(`parts-export-${activeViewId}.zip 완료`);
   };
 
   const handleGif = async () => {
     if (!project) return;
-    setStatus("재조립 GIF 생성 중 (현재 drawOrder)…");
+    setStatus("재조립 GIF 생성 중…");
     const blob = await buildReassemblyGif(project);
     if (gifUrl) URL.revokeObjectURL(gifUrl);
     setGifUrl(URL.createObjectURL(blob));
-    setStatus("재조립 GIF 준비됨 · drawOrder 스택 반영.");
+    setStatus(`재조립 GIF (${activeViewId}) 준비됨`);
   };
 
   if (step === "landing") {
@@ -248,8 +409,8 @@ export default function App() {
             <h1 className="brand">파츠 제작</h1>
             <p className="headline">캐릭터를 올리고, 파츠로 쪼개세요.</p>
             <p className="sub">
-              마스크를 다듬고 Spine식 pivot·parent·draw order를 편집한 뒤, 투명 PNG와
-              재조립 GIF로 검증합니다.
+              다각도 뷰를 만든 뒤 각도별 파츠를 분리하고, Spine 메타와 재조립 GIF로
+              검증합니다.
             </p>
             <div className="cta-row">
               <button
@@ -269,7 +430,7 @@ export default function App() {
                     try {
                       const res = await fetch("/demo-character.png");
                       if (!res.ok) throw new Error("sample missing");
-                      await runPropose(await res.blob());
+                      await runPipeline(await res.blob());
                     } catch (e) {
                       console.error(e);
                       setStatus("샘플 로드 실패");
@@ -281,7 +442,7 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Phase 2 · rembg 세그 + Spine 메타 테이블 · 히든 마커 / 간단 인페인트
+              Phase 3 · 다각도 썸네일 → 뷰별 파츠 파이프라인 · rembg + Spine 메타
             </p>
             <input
               ref={fileRef}
@@ -314,41 +475,9 @@ export default function App() {
               className="btn btn-ghost"
               disabled={!project || busy}
               onClick={() => {
-                if (!project) return;
-                setBusy(true);
-                void (async () => {
-                  try {
-                    const c = document.createElement("canvas");
-                    c.width = project.width;
-                    c.height = project.height;
-                    c.getContext("2d")!.putImageData(project.source, 0, 0);
-                    const blob = await new Promise<Blob | null>((res) =>
-                      c.toBlob(res, "image/png"),
-                    );
-                    if (!blob) throw new Error("encode failed");
-                    const { project: next, info } = await proposePartsBest(blob);
-                    setProject(next);
-                    setSelectedId(next.parts[0]?.id ?? null);
-                    setStatus(
-                      `다시 제안 완료 · ${info.via === "api" ? info.engine : "fallback"}`,
-                    );
-                  } catch (e) {
-                    console.error(e);
-                    const local = proposePartsLocal(project.source);
-                    const withMeta = enrichSpineMeta({
-                      ...local,
-                      hiddenRegions: [],
-                    });
-                    setProject({
-                      ...withMeta,
-                      hiddenRegions: estimateHiddenRegions(withMeta),
-                    });
-                    setSelectedId(withMeta.parts[0]?.id ?? null);
-                    setStatus("API 실패 · 로컬 fallback");
-                  } finally {
-                    setBusy(false);
-                  }
-                })();
+                const slot = viewSlots.find((s) => s.id === activeViewId);
+                if (!slot?.blob) return;
+                void segmentBlob(slot.blob, activeViewId, slot.label);
               }}
             >
               다시 제안
@@ -371,6 +500,15 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        <ViewStrip
+          slots={viewSlots}
+          activeId={activeViewId}
+          busy={busy}
+          onSelect={(id) => void switchView(id)}
+          onUploadView={uploadView}
+          onRegenerate={() => void regenerateViews()}
+        />
 
         <div className="main main-v2">
           <div className="canvas-panel">
@@ -458,13 +596,17 @@ export default function App() {
             </div>
 
             <div className={`canvas-stage${busy || pending ? " busy" : ""}`}>
-              <canvas
-                ref={canvasRef}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerLeave={onPointerUp}
-              />
+              {project ? (
+                <canvas
+                  ref={canvasRef}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  onPointerLeave={onPointerUp}
+                />
+              ) : (
+                <p className="status">이 각도의 파츠 프로젝트가 없습니다.</p>
+              )}
             </div>
             <p className="status">{status}</p>
           </div>
@@ -477,8 +619,8 @@ export default function App() {
                 disabled={!project}
                 onClick={() => {
                   if (!project) return;
-                  setProject(enrichSpineMeta(project));
-                  setStatus("피벗·parent를 마스크 기준으로 다시 추정했습니다.");
+                  commitProject(enrichSpineMeta(project));
+                  setStatus("피벗·parent 재추정");
                 }}
               >
                 피벗 재추정
@@ -489,11 +631,11 @@ export default function App() {
                 disabled={!project}
                 onClick={() => {
                   if (!project) return;
-                  setProject({
+                  commitProject({
                     ...project,
                     hiddenRegions: estimateHiddenRegions(project),
                   });
-                  setStatus("히든 영역 마커를 관절 기준으로 다시 배치했습니다.");
+                  setStatus("히든 마커 재배치");
                 }}
               >
                 히든 재배치
@@ -504,21 +646,24 @@ export default function App() {
                 disabled={!project}
                 onClick={() => {
                   if (!project) return;
-                  setProject(applyLightInpaint(project));
-                  setStatus(
-                    "간단 인페인트 적용 (이웃 평균) · 생성형 inpaint는 TODO",
-                  );
+                  commitProject(applyLightInpaint(project));
+                  setStatus("간단 인페인트 적용 (approx)");
                 }}
               >
                 간단 인페인트
               </button>
-              <button type="button" className="btn btn-ghost" onClick={handleAddPart}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!project}
+                onClick={handleAddPart}
+              >
                 파츠 추가
               </button>
             </div>
 
             <div className="preview-block">
-              <h2>재조립 GIF</h2>
+              <h2>재조립 GIF · {activeViewId}</h2>
               {gifUrl ? (
                 <>
                   <img src={gifUrl} alt="파츠 재조립 미리보기" />
@@ -531,7 +676,7 @@ export default function App() {
                   </button>
                 </>
               ) : (
-                <p className="status">drawOrder 변경 후 GIF로 스택을 확인하세요.</p>
+                <p className="status">현재 뷰의 drawOrder 스택을 GIF로 확인</p>
               )}
             </div>
 
@@ -549,11 +694,10 @@ export default function App() {
                         <button
                           type="button"
                           className="btn btn-ghost"
-                          onClick={() =>
-                            setProject((prev) =>
-                              prev ? removeHiddenMarker(prev, h.id) : prev,
-                            )
-                          }
+                          onClick={() => {
+                            if (!project) return;
+                            commitProject(removeHiddenMarker(project, h.id));
+                          }}
                         >
                           삭제
                         </button>
@@ -572,9 +716,10 @@ export default function App() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             onChange={handlePartChange}
-            onMoveOrder={(id, dir) =>
-              setProject((prev) => (prev ? moveDrawOrder(prev, id, dir) : prev))
-            }
+            onMoveOrder={(id, dir) => {
+              if (!project) return;
+              commitProject(moveDrawOrder(project, id, dir));
+            }}
           />
         )}
 

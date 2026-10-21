@@ -51,13 +51,17 @@ export function extractPartPng(project: ProjectState, part: PartMeta): Blob | nu
   return new Blob([arr], { type: "image/png" });
 }
 
-export async function exportPartsZip(project: ProjectState): Promise<void> {
+export async function exportPartsZip(
+  project: ProjectState,
+  opts?: { viewId?: string; viewBlob?: Blob | null },
+): Promise<void> {
   const zip = new JSZip();
   const folder = zip.folder("parts");
   if (!folder) throw new Error("zip folder failed");
 
   const meta = {
-    version: 2,
+    version: 3,
+    view: opts?.viewId ?? "front",
     width: project.width,
     height: project.height,
     parts: [...project.parts]
@@ -81,6 +85,9 @@ export async function exportPartsZip(project: ProjectState): Promise<void> {
     })),
   };
   folder.file("parts.json", JSON.stringify(meta, null, 2));
+  if (opts?.viewBlob) {
+    folder.file(`view_${opts.viewId ?? "front"}.png`, opts.viewBlob);
+  }
 
   const sorted = [...project.parts].sort((a, b) => a.drawOrder - b.drawOrder);
   for (const part of sorted) {
@@ -91,7 +98,8 @@ export async function exportPartsZip(project: ProjectState): Promise<void> {
   }
 
   const out = await zip.generateAsync({ type: "blob" });
-  saveAs(out, "parts-export.zip");
+  const suffix = opts?.viewId ? `-${opts.viewId}` : "";
+  saveAs(out, `parts-export${suffix}.zip`);
 }
 
 function compositeFrame(

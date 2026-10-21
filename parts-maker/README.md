@@ -1,6 +1,6 @@
-# 파츠 제작 (Parts Maker) — Phase 2
+# 파츠 제작 (Parts Maker) — Phase 3
 
-캐릭터 업로드 → **U2Net 배경 분리 + 워터셰드 파츠** → Spine식 **pivot / parent / drawOrder** 테이블 편집 → 히든 마커·간단 인페인트 → **PNG zip + 재조립 GIF**.
+업로드 → **다각도 뷰 생성** → 각도 썸네일 클릭 → **뷰별 파츠 분리** (rembg + Spine 메타) → PNG zip / 재조립 GIF.
 
 ## 실행
 
@@ -14,37 +14,37 @@ npm run dev:all
 - 웹: http://localhost:5173  
 - API: http://127.0.0.1:8787/health  
 
-웹만(`npm run dev`) 띄우면 세그 API 없이 로컬 marker-watershed fallback.
-
-## Phase 2 기능
+## Phase 3 — 다각도
 
 | 기능 | 상태 |
 |------|------|
-| pivot 자동 추정 (부모 관절 편향) + 클릭/테이블 편집 | 실제 |
-| parent 계층 기본값 + 테이블 편집 | 실제 |
-| drawOrder 편집 → GIF/export 반영 | 실제 |
-| Spine식 파츠 테이블 UI | 실제 |
-| 히든 영역 마커 (관절 overlap) | 실제 |
-| 간단 인페인트 (이웃 평균 채우기) | **approx** — 생성형 inpaint는 TODO |
-| rembg 세그 · 브러시 · PNG zip · GIF | 유지 |
+| 정면/좌/우/위/아래 뷰 생성 | **geometric-proxy** (rembg FG + perspective/shear) |
+| 각도 썸네일 → 기존 파츠 파이프라인 | 실제 |
+| 각도별 이미지 수동 업로드 | 실제 |
+| 뷰 생성 실패 시 | 정면만으로 계속 (앱 비차단) |
+| Zero123 / Replicate novel-view | 훅만 (`REPLICATE_API_TOKEN` + `VIEW_MODEL`) |
 
-`parts.json` export는 **version: 2** (parts + hiddenRegions).
+### 진짜 novel-view 붙이기
 
-## 세그멘테이션 (Phase 1.5)
+1. `server/view_engine.py`의 `_try_replicate_novel_view`를 모델 IO에 맞게 완성하거나  
+2. `/views`가 동일한 JSON(`views[{id,imagePngBase64}]`)을 반환하도록 교체  
 
-- 기본: `server/` FastAPI → rembg U2Net + OpenCV marker watershed  
-- 실패 시: 클라이언트 edge-aware marker flood  
-- SAM 교체: `server/segment_engine.py`의 `propose_parts()` 또는 `/segment` JSON 계약 유지
+환경에 torch/Zero123 가중치·API 키가 없어 기본은 geometric proxy입니다.
+
+## Phase 1–2 (유지)
+
+- rembg U2Net + watershed 세그  
+- 브러시 / 피벗·parent·drawOrder 테이블  
+- 히든 마커 + 간단 인페인트 (approx)  
+- `parts.json` **v3** (`view` 필드 + 현재 뷰 PNG)
 
 ## 데모
 
-1. 샘플로 체험  
-2. 피벗·본·히든 오버레이 확인  
-3. 하단 테이블에서 parent / pivot / drawOrder 수정  
-4. 재조립 GIF → PNG zip  
+1. 샘플로 체험 → 상단 각도 썸네일 확인  
+2. 좌측/우측 클릭 → 해당 뷰 파츠 분리  
+3. 메타 편집 · GIF · PNG zip  
 
 ## 한계
 
-- 히든 인페인트는 가벼운 로컬 채우기 (Firefly/LaMa급 아님)  
-- 시드·parent 테이블은 전신 휴머노이드 가정  
-- 다각도 / 3D / PSD는 Phase 3+  
+- geometric proxy는 **실제 측면 재생성 아님** (왜곡된 정면 기반)  
+- 생성형 inpaint / 3D 메시·리깅 / PSD 미포함  

@@ -540,3 +540,126 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* —— Phase 3 views —— */
+.view-strip {
+  border-bottom: 1px solid var(--line);
+  background: rgba(12, 18, 25, 0.55);
+  padding: 0.65rem 1rem 0.75rem;
+}
+
+.view-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.view-strip-head h2 {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  margin: 0;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+
+.view-strip-head .btn {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.view-thumbs {
+  display: flex;
+  gap: 0.55rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+}
+
+.view-thumb {
+  flex: 0 0 auto;
+  width: 92px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.view-thumb:focus-visible .view-thumb-btn {
+  border-color: var(--teal);
+}
+
+.view-thumb-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #0f1824;
+  overflow: hidden;
+  color: inherit;
+  pointer-events: none;
+}
+
+.view-thumb.active .view-thumb-btn {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 1px rgba(232, 165, 75, 0.35);
+}
+
+.view-thumb-btn img {
+  width: 100%;
+  height: 110px;
+  object-fit: contain;
+  background:
+    linear-gradient(45deg, #1a2535 25%, transparent 25%),
+    linear-gradient(-45deg, #1a2535 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1a2535 75%),
+    linear-gradient(-45deg, transparent 75%, #1a2535 75%);
+  background-size: 12px 12px;
+  background-position:
+    0 0,
+    0 6px,
+    6px -6px,
+    -6px 0;
+  background-color: #121c2a;
+}
+
+.view-placeholder {
+  display: grid;
+  place-items: center;
+  height: 110px;
+  color: var(--paper-dim);
+  font-size: 0.8rem;
+}
+
+.view-caption {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem 0.35rem;
+  color: var(--paper-dim);
+}
+
+.view-thumb.active .view-caption {
+  color: var(--amber);
+}
+
+.view-upload {
+  font-size: 0.7rem;
+  text-align: center;
+  color: var(--paper-dim);
+  cursor: pointer;
+  border: 1px dashed var(--line);
+  border-radius: 3px;
+  padding: 0.15rem;
+}
+
+.view-upload:hover {
+  color: var(--amber);
+  border-color: rgba(232, 165, 75, 0.45);
+}
+
+.view-engine {
+  margin: 0.45rem 0 0;
+}
