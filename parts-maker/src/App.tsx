@@ -406,10 +406,10 @@ export default function App() {
 
   const handleExportPsd = async () => {
     if (!project) return;
-    setStatus("파츠 이미지 + parts.json 생성 중…");
+    setStatus("파츠 PNG + 미리보기 + PSD 생성 중…");
     try {
       await exportPartsPsd(project, { viewId: activeViewId });
-      setStatus(`parts-psd-${activeViewId}.zip 완료 (파츠 이미지 + 메타 JSON)`);
+      setStatus(`parts-images-${activeViewId}.zip 완료 (png/ + preview + PSD)`);
     } catch (e) {
       console.error(e);
       setStatus("파츠이미지다운 실패");

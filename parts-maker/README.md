@@ -18,11 +18,17 @@ npm run dev:all
 
 ## 파츠이미지다운
 
-상단 **「파츠이미지다운」** → `parts-psd-{view}.zip`  
-- `parts-{view}.psd` — 파츠당 1장(레이어), 이름 `{drawOrder}_{name}`, 스택 = drawOrder (아래→위)  
-- `parts.json` — pivot / parent / drawOrder / hiddenRegions 사이드카  
+상단 **「파츠이미지다운」** → `parts-images-{view}.zip`
 
-포맷은 편의상 PSD 컨테이너(ag-psd). 포토샵으로 “전송”하는 기능이 아니라 **파츠 이미지를 내려받는 것**입니다.
+| 파일 | 내용 |
+|------|------|
+| `png/*.png` | 파츠별 투명 PNG |
+| `preview-composite.png` | 파츠를 겹친 전체 미리보기 |
+| `parts-{view}.psd` | 같은 파츠의 레이어 PSD (포토샵/클립) |
+| `parts.json` | pivot / parent / drawOrder 메타 |
+
+개별 PNG는 조각처럼 보이는 게 정상입니다. 전체는 `preview-composite.png` 또는 PSD에서 확인하세요.  
+자동 경계가 이상하면 앱에서 브러시로 고친 뒤 다시 다운하면 됩니다.
 
 ### 한계 (정직하게)
 

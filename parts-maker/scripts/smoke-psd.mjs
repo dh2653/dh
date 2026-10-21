@@ -22,7 +22,7 @@ await page.screenshot({ path: path.join(OUT, "workspace-before-export.png") });
 
 const [download] = await Promise.all([
   page.waitForEvent("download", { timeout: 120_000 }),
-  page.getByRole("button", { name: "PSD보내기" }).click(),
+  page.getByRole("button", { name: "파츠이미지다운" }).click(),
 ]);
 await page.waitForTimeout(400);
 await page.screenshot({ path: path.join(OUT, "export-button.png") });

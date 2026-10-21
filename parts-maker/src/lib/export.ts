@@ -187,7 +187,34 @@ export function buildPartsPsd(project: ProjectState): Uint8Array {
   });
 }
 
-/** Download layered .psd + parts.json sidecar in a zip. */
+/** Full-canvas composite of all parts (for preview in the download zip). */
+function compositePreviewPng(project: ProjectState): Blob {
+  const { width: w, height: h, source, labels } = project;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  const out = ctx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    if (labels[i] === 0) continue;
+    const o = i * 4;
+    out.data[o] = source.data[o]!;
+    out.data[o + 1] = source.data[o + 1]!;
+    out.data[o + 2] = source.data[o + 2]!;
+    out.data[o + 3] = source.data[o + 3]!;
+  }
+  ctx.putImageData(out, 0, 0);
+  const dataUrl = canvas.toDataURL("image/png");
+  const bin = atob(dataUrl.split(",")[1]!);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: "image/png" });
+}
+
+/**
+ * Parts image download: per-part PNGs + composite preview + parts.json,
+ * plus a layered .psd for Photoshop/Clip (same rasters).
+ */
 export async function exportPartsPsd(
   project: ProjectState,
   opts?: { viewId?: string },
@@ -197,6 +224,18 @@ export async function exportPartsPsd(
   const meta = buildPartsMeta(project, viewId);
 
   const zip = new JSZip();
+  const pngFolder = zip.folder("png");
+  if (!pngFolder) throw new Error("zip folder failed");
+
+  const sorted = [...project.parts].sort((a, b) => a.drawOrder - b.drawOrder);
+  for (const part of sorted) {
+    const blob = extractPartPng(project, part);
+    if (!blob) continue;
+    const safe = part.name.replace(/[^\w\-]+/g, "_") || `part_${part.id}`;
+    pngFolder.file(`${String(part.drawOrder).padStart(2, "0")}_${safe}.png`, blob);
+  }
+  zip.file("preview-composite.png", compositePreviewPng(project));
+
   const copy = new Uint8Array(psdBytes.byteLength);
   copy.set(psdBytes);
   zip.file(`parts-${viewId}.psd`, copy);
@@ -205,9 +244,14 @@ export async function exportPartsPsd(
     JSON.stringify(
       {
         ...meta,
-        exportFormat: "psd",
-        psdNotes:
-          "Layers via ag-psd: raster only, normal blend, stack = drawOrder (bottom→top). No smart objects / FX.",
+        exportFormat: "parts-images",
+        contents: {
+          png: "개별 파츠 이미지 (투명 PNG)",
+          "preview-composite.png": "파츠를 겹친 미리보기",
+          [`parts-${viewId}.psd`]: "같은 파츠의 레이어 PSD (포토샵/클립용)",
+        },
+        note:
+          "개별 PNG는 잘린 조각처럼 보일 수 있음 — preview-composite.png 또는 PSD에서 겹쳐 보면 전체가 맞음. 자동 파츠 경계가 어색하면 앱에서 브러시로 고친 뒤 다시 다운.",
       },
       null,
       2,
@@ -215,7 +259,7 @@ export async function exportPartsPsd(
   );
 
   const out = await zip.generateAsync({ type: "blob" });
-  saveAs(out, `parts-psd-${viewId}.zip`);
+  saveAs(out, `parts-images-${viewId}.zip`);
 }
 
 function compositeFrame(
